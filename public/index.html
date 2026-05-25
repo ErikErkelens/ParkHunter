@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ParkHunter</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">POTA / WWFF / SOTA CW spots</p>
+        <h1>ParkHunter</h1>
+      </div>
+      <button id="refreshButton" class="icon-button" type="button" title="Refresh spots" aria-label="Refresh spots">
+        <span aria-hidden="true">R</span>
+      </button>
+    </header>
+
+    <main class="app-shell">
+      <section class="controls" aria-label="Spot filters and Commander settings">
+        <label>
+          Spot age
+          <select id="ageSelect">
+            <option value="900">15 min</option>
+            <option value="1800" selected>30 min</option>
+            <option value="3600">60 min</option>
+          </select>
+        </label>
+
+        <label>
+          Band
+          <select id="bandSelect">
+            <option value="">All bands</option>
+            <option>80m</option>
+            <option>60m</option>
+            <option>40m</option>
+            <option>30m</option>
+            <option>20m</option>
+            <option>17m</option>
+            <option>15m</option>
+            <option>12m</option>
+            <option>10m</option>
+            <option>6m</option>
+            <option>2m</option>
+          </select>
+        </label>
+
+        <label>
+          VFO offset (Hz)
+          <input id="vfoOffsetHz" type="number" min="-5000" max="5000" step="10" value="90">
+        </label>
+
+        <label>
+          Scan delay (s)
+          <input id="scanDelaySeconds" type="number" min="1" max="300" step="1" value="3">
+        </label>
+
+        <button id="scanButton" type="button" class="scan-button">Scan</button>
+      </section>
+
+      <section class="status-row" aria-live="polite">
+        <span id="statusText">Loading spots...</span>
+        <span id="lastUpdated"></span>
+      </section>
+
+      <section class="spot-table-wrap" aria-label="CW spots">
+        <table>
+          <thead>
+            <tr>
+              <th>UTC</th>
+              <th>Call</th>
+              <th>Frequency</th>
+              <th>Band</th>
+              <th>State/Prov</th>
+              <th>Reference</th>
+              <th>Spotter</th>
+              <th>Worked</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="spotsBody"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <template id="spotRowTemplate">
+      <tr>
+        <td data-cell="time"></td>
+        <td data-cell="call" class="strong"></td>
+        <td data-cell="freq" class="mono"></td>
+        <td data-cell="band"></td>
+        <td data-cell="region"></td>
+        <td data-cell="ref"></td>
+        <td data-cell="spotter" class="mono"></td>
+        <td data-cell="worked"></td>
+        <td class="actions">
+          <label class="tried-control" title="Mark tried but not heard">
+            <input class="tried-checkbox" type="checkbox" aria-label="Mark tried but not heard">
+          </label>
+          <button type="button" class="log-button">Log</button>
+        </td>
+      </tr>
+    </template>
+
+    <dialog id="logDialog" class="log-dialog">
+      <form method="dialog">
+        <div class="dialog-header">
+          <h2 id="logDialogTitle">Log contact</h2>
+          <button id="closeLogDialog" class="dialog-close" type="button" aria-label="Close">X</button>
+        </div>
+        <p id="logDialogDetails" class="dialog-details"></p>
+        <div class="dialog-fields">
+          <div class="report-field">
+            <span>Signal report</span>
+            <input id="signalReportInput" type="hidden" value="559">
+            <div id="signalReportButtons" class="report-buttons" role="group" aria-label="Signal report">
+              <button type="button" class="report-button" data-report="339" data-hotkey="3">339</button>
+              <button type="button" class="report-button" data-report="449" data-hotkey="4">449</button>
+              <button type="button" class="report-button" data-report="559" data-hotkey="5">559</button>
+              <button type="button" class="report-button" data-report="579" data-hotkey="7">579</button>
+              <button type="button" class="report-button" data-report="999" data-hotkey="9">999</button>
+            </div>
+          </div>
+          <label>
+            Comment
+            <input id="spotCommentInput" value="599 WNY" autocomplete="off">
+          </label>
+          <label class="dialog-checkbox">
+            <input id="spotAfterLogCheckbox" type="checkbox" checked>
+            Spot
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button id="confirmLogButton" type="button" class="log-button">Log</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="scanDialog" class="scan-dialog">
+      <form method="dialog">
+        <div class="dialog-header">
+          <h2>Scan</h2>
+          <button id="closeScanDialog" class="dialog-close" type="submit" aria-label="Close">X</button>
+        </div>
+        <div class="scan-details">
+          <div>
+            <span>Station</span>
+            <strong id="scanStation">-</strong>
+          </div>
+          <div>
+            <span>Reference</span>
+            <strong id="scanReference">-</strong>
+          </div>
+          <div>
+            <span>Frequency</span>
+            <strong id="scanFrequency">-</strong>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button id="stopScanButton" type="button" class="secondary-button">Stop</button>
+          <button id="skipScanButton" type="button" class="spot-button">Skip</button>
+          <button id="nextScanButton" type="button" class="tune-button">Next</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="shortcutsDialog" class="shortcuts-dialog">
+      <form method="dialog">
+        <div class="dialog-header">
+          <h2>Shortcuts</h2>
+          <button id="closeShortcutsDialog" class="dialog-close" type="submit" aria-label="Close">X</button>
+        </div>
+        <dl class="shortcut-list">
+          <div>
+            <dt>Up / Down</dt>
+            <dd>Select and tune previous or next spot</dd>
+          </div>
+          <div>
+            <dt>L</dt>
+            <dd>Log selected spot</dd>
+          </div>
+          <div>
+            <dt>3 / 4 / 5 / 7 / 9</dt>
+            <dd>In log, choose 339 / 449 / 559 / 579 / 999</dd>
+          </div>
+          <div>
+            <dt>S</dt>
+            <dd>Start scan; in scan, skip current spot</dd>
+          </div>
+          <div>
+            <dt>Space</dt>
+            <dd>In scan, move to next spot</dd>
+          </div>
+          <div>
+            <dt>?</dt>
+            <dd>Show shortcuts</dd>
+          </div>
+        </dl>
+      </form>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

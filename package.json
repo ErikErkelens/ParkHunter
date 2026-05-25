@@ -1,0 +1,14 @@
+{
+  "name": "parkhunter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CW xOTA spot browser with DXLab Commander tuning support.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

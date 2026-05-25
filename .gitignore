@@ -1,0 +1,4 @@
+server.*.log
+node_modules/
+.env.local
+.cache/
