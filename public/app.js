@@ -4,6 +4,7 @@ const refreshButton = document.querySelector("#refreshButton");
 const statusText = document.querySelector("#statusText");
 const lastUpdated = document.querySelector("#lastUpdated");
 const ageSelect = document.querySelector("#ageSelect");
+const modeSelect = document.querySelector("#modeSelect");
 const bandSelect = document.querySelector("#bandSelect");
 const vfoOffsetHz = document.querySelector("#vfoOffsetHz");
 const scanDelaySeconds = document.querySelector("#scanDelaySeconds");
@@ -35,6 +36,7 @@ let currentSpots = [];
 let appConfig = {
   cwTxOffsetHz: 90,
   spotAgeSeconds: 1800,
+  spotLimit: 500,
   scanDelaySeconds: 3
 };
 let logState = loadLogState();
@@ -126,6 +128,23 @@ function formatFrequency(freqHz) {
 function isValidSpotFrequency(freqHz) {
   const numericFreq = Number(freqHz);
   return Number.isFinite(numericFreq) && numericFreq > 0 && numericFreq <= MAX_SCANNABLE_FREQ_HZ;
+}
+
+function isPhoneInCwOnlyPortion(spot) {
+  return Boolean(spot.phoneInCwOnlyPortion);
+}
+
+function effectiveSpotMode(spot) {
+  return spot.modeOverride || (isPhoneInCwOnlyPortion(spot) ? "CW" : (spot.mode || spot.mode_type || "CW"));
+}
+
+function logCommentForSpot(spot, comment) {
+  const cleanComment = String(comment || "").trim();
+  if (!isPhoneInCwOnlyPortion(spot) || /^CW\b/i.test(cleanComment)) {
+    return cleanComment;
+  }
+
+  return ["CW", cleanComment].filter(Boolean).join(" ");
 }
 
 function cleanSignalReport(report) {
@@ -338,7 +357,7 @@ async function tuneCommander(spot) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       freq: spot.freq,
-      mode: spot.mode || spot.mode_type || "CW",
+      mode: effectiveSpotMode(spot),
       vfoOffsetHz: offsetHz
     })
   });
@@ -395,7 +414,7 @@ function markSpotTried(spot) {
 
 async function logSpot(spot) {
   const signalReport = cleanSignalReport(signalReportInput.value);
-  const spotComment = spotCommentInput.value.trim() || defaultSpotComment(signalReport);
+  const spotComment = logCommentForSpot(spot, spotCommentInput.value.trim() || defaultSpotComment(signalReport));
   setStatus(`Logging ${spot.dx_call} on ${formatFrequency(spot.freq)}...`);
 
   const response = await fetch("/api/log", {
@@ -422,7 +441,7 @@ async function logSpot(spot) {
 
 async function spotStation(spot) {
   const signalReport = cleanSignalReport(signalReportInput.value);
-  const spotComment = spotCommentInput.value.trim() || defaultSpotComment(signalReport);
+  const spotComment = logCommentForSpot(spot, spotCommentInput.value.trim() || defaultSpotComment(signalReport));
   setStatus(`Spotting ${spot.dx_call}...`);
 
   try {
@@ -432,6 +451,7 @@ async function spotStation(spot) {
       body: JSON.stringify({
         spot: {
           ...spot,
+          mode: effectiveSpotMode(spot),
           spotComment
         },
         comment: spotComment
@@ -531,6 +551,13 @@ function renderWorkedBadges(cell, spot) {
     triedBadge.className = "state-badge tried-badge";
     triedBadge.textContent = "Tried";
     wrap.append(triedBadge);
+  }
+
+  if (isPhoneInCwOnlyPortion(spot)) {
+    const phoneBadge = document.createElement("span");
+    phoneBadge.className = "state-badge phone-badge";
+    phoneBadge.textContent = "Phone";
+    wrap.append(phoneBadge);
   }
 
   if (wrap.childElementCount) {
@@ -746,7 +773,7 @@ function renderSpots(spots) {
   spotsBody.replaceChildren();
 
   if (!spots.length) {
-    renderEmpty("No matching CW xOTA spots found in this time window.");
+    renderEmpty(`No matching ${modeSelect.value === "PHONE" ? "phone" : "CW"} xOTA spots found in this time window.`);
     return;
   }
 
@@ -798,7 +825,8 @@ async function loadSpots() {
   try {
     const params = new URLSearchParams({
       max_age: ageSelect.value,
-      limit: "100"
+      mode_type: modeSelect.value,
+      limit: String(appConfig.spotLimit || 500)
     });
 
     if (bandSelect.value) {
@@ -817,7 +845,8 @@ async function loadSpots() {
     const preparedSpots = prepareSpots(spots);
     currentSpots = preparedSpots;
     renderSpots(preparedSpots);
-    setStatus(`${preparedSpots.length} latest CW spot${preparedSpots.length === 1 ? "" : "s"} from POTA, WWFF, and SOTA.`);
+    const modeLabel = modeSelect.value === "PHONE" ? "phone" : "CW";
+    setStatus(`${preparedSpots.length} latest ${modeLabel} spot${preparedSpots.length === 1 ? "" : "s"} from POTA, WWFF, and SOTA.`);
     lastUpdated.textContent = `Updated ${new Date().toLocaleTimeString()}`;
     nextRefreshDelayMs = DEFAULT_REFRESH_MS;
   } catch (error) {
@@ -917,6 +946,7 @@ function handleKeydown(event) {
 
 refreshButton.addEventListener("click", loadSpots);
 ageSelect.addEventListener("change", loadSpots);
+modeSelect.addEventListener("change", loadSpots);
 bandSelect.addEventListener("change", loadSpots);
 scanButton.addEventListener("click", startScan);
 stopScanButton.addEventListener("click", () => stopScan());

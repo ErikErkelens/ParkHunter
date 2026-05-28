@@ -300,6 +300,12 @@ tbody tr.tuned-exact:hover {
   color: #5c6672;
 }
 
+.phone-badge {
+  background: #ffe0bd;
+  border: 1px solid #e5963d;
+  color: #8a4300;
+}
+
 tr.logged-exact td:not(:last-child) {
   text-decoration: line-through;
   text-decoration-color: #ba1a1a;
@@ -324,9 +330,9 @@ tr.logged-exact td:not(:last-child) {
   border-radius: 8px;
   box-shadow: var(--shadow);
   color: var(--text);
-  max-width: min(420px, calc(100vw - 32px));
+  max-width: min(460px, calc(100vw - 32px));
   padding: 0;
-  width: 420px;
+  width: 460px;
 }
 
 .log-dialog::backdrop,
@@ -388,8 +394,8 @@ tr.logged-exact td:not(:last-child) {
 
 .report-buttons {
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(5, minmax(54px, 1fr));
+  gap: 6px;
+  grid-template-columns: repeat(6, minmax(48px, 1fr));
 }
 
 .report-button {
@@ -400,8 +406,8 @@ tr.logged-exact td:not(:last-child) {
   cursor: pointer;
   font: inherit;
   font-weight: 800;
-  min-height: 38px;
-  padding: 6px 8px;
+  min-height: 34px;
+  padding: 5px 6px;
 }
 
 .report-button:hover,

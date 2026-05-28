@@ -12,6 +12,7 @@ import {
   buildTuneCommands,
   hzToMhz,
   hzToCommanderKhz,
+  isPhoneInCwOnlyPortion,
   isPotaSpot,
   isQrtSpot,
   normalizeCommanderMode,
@@ -148,10 +149,31 @@ test("builds a POTA spot API payload", () => {
       reference: "US-6563",
       comments: "559 WNY",
       spotter: "N2EPE",
-      source: "ParkHunter - n2epe",
+      source: "ParkHunter",
       timestamp: "2024-05-23T14:32:00.000Z"
     }
   );
+});
+
+test("treats phone spots in CW-only portions as CW when requested", () => {
+  assert.equal(isPhoneInCwOnlyPortion(14050000), true);
+  assert.equal(isPhoneInCwOnlyPortion(14283000), false);
+
+  const spot = {
+    dx_call: "N0CALL",
+    freq: 14050000,
+    band: "20m",
+    mode_type: "PHONE",
+    phoneInCwOnlyPortion: true,
+    sig: "POTA",
+    sig_refs: [{ id: "US-6563" }],
+    signalReport: "599",
+    logComment: "CW 599 WNY"
+  };
+
+  assert.equal(buildTuneCommands({ freqHz: spot.freq, mode: "CW" }).length, 2);
+  assert.match(buildDxKeeperLogCommand({ spot }), /<MODE:2>CW/);
+  assert.equal(buildPotaSpotPayload({ spot, spotter: "n2epe", comment: "CW 599 WNY" }).mode, "CW");
 });
 
 test("normalizes SSB-style modes when a non-CW spot is passed in", () => {

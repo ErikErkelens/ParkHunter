@@ -28,6 +28,7 @@ DXKEEPER_PORT=52001
 
 CW_TX_OFFSET_HZ=90
 SPOT_AGE_SECONDS=1800
+SPOT_LIMIT=500
 SCAN_DELAY_SECONDS=3
 
 QRZ_USERNAME=your-callsign
@@ -39,7 +40,7 @@ DXCLUSTER_USERNAME=your-callsign
 
 POTA_SPOT_TARGET=pota
 POTA_SPOTTER_CALLSIGN=your-callsign
-POTA_SPOT_SOURCE=ParkHunter - your-callsign
+POTA_SPOT_SOURCE=ParkHunter
 POTA_BEARER_TOKEN=your-pota-jwt
 POTA_REFRESH_TOKEN=your-pota-refresh-token
 POTA_COGNITO_CLIENT_ID=7hluqct0n2nckib7i7sd5753oa
@@ -55,6 +56,7 @@ Useful operating defaults:
 
 - `CW_TX_OFFSET_HZ`: CW transmit offset used for Commander's split command. Default `90`.
 - `SPOT_AGE_SECONDS`: initial spot age filter. Default `1800`, or 30 minutes. Accepted UI values are `900`, `1800`, and `3600`.
+- `SPOT_LIMIT`: number of recent Spothole spots requested per refresh. Default `500`, capped at `1000`.
 - `SCAN_DELAY_SECONDS`: scan auto-advance delay. Default `3`.
 
 Optional spot enrichment:
@@ -100,6 +102,7 @@ The Log action sends DXKeeper a `log` TCP message with an ADIF record containing
 The Scan button tunes through the current spot list, starting after the currently tuned row and wrapping back to the top at the end.
 Scan skips spots already logged for the current UTC day, spots marked tried, spots with invalid frequencies, and spots above the 6m band.
 Skip marks the current spot tried before advancing; Next advances without marking; Stop closes the scan dialog.
+The mode filter can show CW or phone spots. Phone spots that appear inside CW-only band segments are included with CW spots, marked with an orange Phone pill, tuned and logged as CW, and logged with `CW` prepended to the comment.
 
 ParkHunter remembers logs and tried spots in browser local storage for the current UTC day. A row is crossed out when that callsign has already been logged on that band.
 
@@ -107,7 +110,7 @@ ParkHunter remembers logs and tried spots in browser local storage for the curre
 
 - `Up` / `Down`: select and tune the previous or next spot
 - `L`: log the selected spot
-- `3` / `4` / `5` / `7` / `9`: in the log dialog, choose `339` / `449` / `559` / `579` / `999`
+- `3` / `4` / `5` / `7` / `9`: in the log dialog, choose `339` / `449` / `559` / `579` / `599`; `539` is available as a button
 - `S`: start scan from the main screen; skip current spot in the scan dialog
 - `Space`: next spot in the scan dialog
 - `?`: show shortcuts

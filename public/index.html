@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ParkHunter</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -25,6 +26,14 @@
             <option value="900">15 min</option>
             <option value="1800" selected>30 min</option>
             <option value="3600">60 min</option>
+          </select>
+        </label>
+
+        <label>
+          Mode
+          <select id="modeSelect">
+            <option value="CW" selected>CW</option>
+            <option value="PHONE">Phone</option>
           </select>
         </label>
 
@@ -117,9 +126,10 @@
             <div id="signalReportButtons" class="report-buttons" role="group" aria-label="Signal report">
               <button type="button" class="report-button" data-report="339" data-hotkey="3">339</button>
               <button type="button" class="report-button" data-report="449" data-hotkey="4">449</button>
+              <button type="button" class="report-button" data-report="539">539</button>
               <button type="button" class="report-button" data-report="559" data-hotkey="5">559</button>
               <button type="button" class="report-button" data-report="579" data-hotkey="7">579</button>
-              <button type="button" class="report-button" data-report="999" data-hotkey="9">999</button>
+              <button type="button" class="report-button" data-report="599" data-hotkey="9">599</button>
             </div>
           </div>
           <label>
@@ -182,7 +192,7 @@
           </div>
           <div>
             <dt>3 / 4 / 5 / 7 / 9</dt>
-            <dd>In log, choose 339 / 449 / 559 / 579 / 999</dd>
+            <dd>In log, choose 339 / 449 / 539 / 559 / 579 / 599</dd>
           </div>
           <div>
             <dt>S</dt>

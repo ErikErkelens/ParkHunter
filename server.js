@@ -37,6 +37,8 @@ const SPOTHOLE_BASE_URL = process.env.SPOTHOLE_BASE_URL || "https://spothole.app
 const SPOTHOLE_REFRESH_MS = Number(process.env.SPOTHOLE_REFRESH_MS || 30000);
 const SPOTHOLE_RATE_LIMIT_BACKOFF_MS = Number(process.env.SPOTHOLE_RATE_LIMIT_BACKOFF_MS || 10 * 60 * 1000);
 const SPOTHOLE_ERROR_BACKOFF_MS = Number(process.env.SPOTHOLE_ERROR_BACKOFF_MS || 2 * 60 * 1000);
+const DEFAULT_SPOT_LIMIT = Number(process.env.SPOT_LIMIT || 500);
+const MAX_SPOT_LIMIT = 1000;
 const DEFAULT_SPOT_AGE_SECONDS = Number(process.env.SPOT_AGE_SECONDS || process.env.DEFAULT_SPOT_AGE_SECONDS || 1800);
 const DEFAULT_SCAN_DELAY_SECONDS = Number(process.env.SCAN_DELAY_SECONDS || process.env.DEFAULT_SCAN_DELAY_SECONDS || 3);
 const DEFAULT_COMMANDER_HOST = process.env.COMMANDER_HOST || "127.0.0.1";
@@ -63,7 +65,10 @@ const POTA_REFRESH_TOKEN = process.env.POTA_REFRESH_TOKEN || "";
 const POTA_COGNITO_CLIENT_ID = process.env.POTA_COGNITO_CLIENT_ID || "7hluqct0n2nckib7i7sd5753oa";
 const POTA_COGNITO_REGION = process.env.POTA_COGNITO_REGION || "us-east-2";
 const POTA_SPOTTER_CALLSIGN = process.env.POTA_SPOTTER_CALLSIGN || QRZ_USERNAME || DXCLUSTER_USERNAME || "";
-const POTA_SPOT_SOURCE = process.env.POTA_SPOT_SOURCE || `ParkHunter - ${POTA_SPOTTER_CALLSIGN || "unknown"}`;
+const CONFIGURED_POTA_SPOT_SOURCE = String(process.env.POTA_SPOT_SOURCE || "ParkHunter").trim();
+const POTA_SPOT_SOURCE = /^ParkHunter\s+-\s+/i.test(CONFIGURED_POTA_SPOT_SOURCE)
+  ? "ParkHunter"
+  : CONFIGURED_POTA_SPOT_SOURCE;
 const POTA_SPOT_TARGET = String(process.env.POTA_SPOT_TARGET || "pota").trim().toLowerCase();
 
 let qrzSessionKey = "";
@@ -167,6 +172,35 @@ export function buildQsxSplitCommand({ txFreqHz }) {
 
 export function isCwCommanderMode(mode) {
   return mode === "CW" || mode === "CW-R";
+}
+
+export function isPhoneInCwOnlyPortion(freqHz) {
+  const freq = Number(freqHz);
+  if (!Number.isFinite(freq) || freq <= 0) {
+    return false;
+  }
+
+  return [
+    [1800000, 1840000],
+    [3500000, 3600000],
+    [7000000, 7125000],
+    [10100000, 10150000],
+    [14000000, 14150000],
+    [18068000, 18110000],
+    [21000000, 21200000],
+    [24890000, 24930000],
+    [28000000, 28300000],
+    [50000000, 50100000],
+    [144000000, 144100000]
+  ].some(([lower, upper]) => freq >= lower && freq <= upper);
+}
+
+function effectiveSpotMode(spot) {
+  if (spot?.phoneInCwOnlyPortion) {
+    return "CW";
+  }
+
+  return spot?.modeOverride || spot?.mode || spot?.mode_type;
 }
 
 export function buildTuneCommands({ freqHz, mode, cwTxOffsetHz = CW_TX_OFFSET_HZ }) {
@@ -338,7 +372,7 @@ export function buildPotaSpotPayload({ spot, comment, spotter, timestamp = new D
   const reference = spotReference(spot, "POTA") || normalizeAdifValue(spot.reference);
   const normalizedSpotter = normalizeAdifValue(spotter || POTA_SPOTTER_CALLSIGN).toUpperCase();
   const frequency = hzToMhz(spot.freq);
-  const mode = normalizeCommanderMode(spot.mode || spot.mode_type, spot.freq);
+  const mode = normalizeCommanderMode(effectiveSpotMode(spot), spot.freq);
   const comments = normalizeAdifValue(comment || spot.spotComment || spot.logComment || spot.comment);
 
   if (!activator) {
@@ -366,7 +400,7 @@ export function buildPotaSpotPayload({ spot, comment, spotter, timestamp = new D
 }
 
 export function buildDxClusterSpotNotes({ spot, comment }) {
-  const mode = normalizeCommanderMode(spot.mode || spot.mode_type, spot.freq);
+  const mode = normalizeCommanderMode(effectiveSpotMode(spot), spot.freq);
   const cleanComment = normalizeAdifValue(comment || spot.spotComment || spot.logComment || spot.comment);
   const potaRef = spotReference(spot, "POTA");
   const sotaRef = spotReference(spot, "SOTA");
@@ -402,7 +436,7 @@ export function buildDxClusterSpotCommand({ spot, comment }) {
 
 export function buildDxKeeperLogCommand({ spot, loggedAt = new Date() }) {
   const { qsoDate, timeOn } = utcLogParts(loggedAt);
-  const mode = normalizeCommanderMode(spot.mode || spot.mode_type, spot.freq);
+  const mode = normalizeCommanderMode(effectiveSpotMode(spot), spot.freq);
   const sig = normalizeAdifValue(spot.sig || spot.source).toUpperCase();
   const reference = normalizeAdifValue(spot.sig_refs?.[0]?.id || spot.reference || "");
   const potaRef = firstSigRef(spot, "POTA")?.id || (sig === "POTA" ? reference : "");
@@ -765,61 +799,91 @@ async function handleSpots(request, response) {
   }
 
   const requestUrl = new URL(request.url, `http://${request.headers.host}`);
-  const upstreamUrl = new URL("/api/v1/spots", SPOTHOLE_BASE_URL);
-  upstreamUrl.searchParams.set("sig", requestUrl.searchParams.get("sig") || "POTA,SOTA,WWFF");
-  upstreamUrl.searchParams.set("mode_type", requestUrl.searchParams.get("mode_type") || "CW");
-  upstreamUrl.searchParams.set("limit", requestUrl.searchParams.get("limit") || "75");
-  upstreamUrl.searchParams.set("max_age", requestUrl.searchParams.get("max_age") || String(DEFAULT_SPOT_AGE_SECONDS));
+  const requestedLimit = Number(requestUrl.searchParams.get("limit") || DEFAULT_SPOT_LIMIT);
+  const spotLimit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(Math.trunc(requestedLimit), 1), MAX_SPOT_LIMIT)
+    : DEFAULT_SPOT_LIMIT;
+  const requestedModeType = String(requestUrl.searchParams.get("mode_type") || "CW").trim().toUpperCase();
+  const modeTypes = requestedModeType === "PHONE" ? ["PHONE"] : ["CW", "PHONE"];
+  const upstreamUrls = modeTypes.map(modeType => {
+    const upstreamUrl = new URL("/api/v1/spots", SPOTHOLE_BASE_URL);
+    upstreamUrl.searchParams.set("sig", requestUrl.searchParams.get("sig") || "POTA,SOTA,WWFF");
+    upstreamUrl.searchParams.set("mode_type", modeType);
+    upstreamUrl.searchParams.set("limit", String(spotLimit));
+    upstreamUrl.searchParams.set("max_age", requestUrl.searchParams.get("max_age") || String(DEFAULT_SPOT_AGE_SECONDS));
+    return upstreamUrl;
+  });
 
   const band = requestUrl.searchParams.get("band");
   if (band) {
-    upstreamUrl.searchParams.set("band", band);
+    upstreamUrls.forEach(upstreamUrl => upstreamUrl.searchParams.set("band", band));
   }
 
   try {
     const qrzSessionKey = await getQrzSessionKey();
     if (qrzSessionKey) {
-      upstreamUrl.searchParams.set("qrz_session_key", qrzSessionKey);
+      upstreamUrls.forEach(upstreamUrl => upstreamUrl.searchParams.set("qrz_session_key", qrzSessionKey));
     }
   } catch {
     // Callsign enrichment is optional; spots should still load if QRZ is unavailable.
   }
 
-  let upstreamResponse;
-  try {
-    upstreamResponse = await fetch(upstreamUrl, {
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": "ParkHunter/0.1"
+  const spotsById = new Map();
+  for (const upstreamUrl of upstreamUrls) {
+    let upstreamResponse;
+    try {
+      upstreamResponse = await fetch(upstreamUrl, {
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "ParkHunter/0.1"
+        }
+      });
+    } catch (error) {
+      const retryAfterMs = setSpotholeBackoff({
+        status: "network error",
+        retryAfterMs: SPOTHOLE_ERROR_BACKOFF_MS
+      });
+      sendJson(response, 503, {
+        ok: false,
+        error: `Could not reach Spothole: ${error.message}. Pausing requests for ${Math.ceil(retryAfterMs / 1000)} seconds.`,
+        retryAfterMs
+      });
+      return;
+    }
+
+    if (!upstreamResponse.ok) {
+      const retryAfterMs = setSpotholeBackoff({
+        status: upstreamResponse.status,
+        retryAfterMs: spotholeBackoffMsForResponse(upstreamResponse)
+      });
+      sendJson(response, upstreamResponse.status === 429 ? 429 : 503, {
+        ok: false,
+        error: `Spothole returned HTTP ${upstreamResponse.status}. Pausing requests for ${Math.ceil(retryAfterMs / 1000)} seconds.`,
+        retryAfterMs
+      });
+      return;
+    }
+
+    for (const spot of await upstreamResponse.json()) {
+      const modeType = String(spot.mode_type || "").toUpperCase();
+      if (requestedModeType !== "PHONE" && modeType === "PHONE") {
+        if (!isPhoneInCwOnlyPortion(spot.freq)) {
+          continue;
+        }
+
+        spotsById.set(spot.id || `${spot.dx_call}|${spot.freq}|${spot.time_iso}`, {
+          ...spot,
+          phoneInCwOnlyPortion: true,
+          modeOverride: "CW"
+        });
+        continue;
       }
-    });
-  } catch (error) {
-    const retryAfterMs = setSpotholeBackoff({
-      status: "network error",
-      retryAfterMs: SPOTHOLE_ERROR_BACKOFF_MS
-    });
-    sendJson(response, 503, {
-      ok: false,
-      error: `Could not reach Spothole: ${error.message}. Pausing requests for ${Math.ceil(retryAfterMs / 1000)} seconds.`,
-      retryAfterMs
-    });
-    return;
+
+      spotsById.set(spot.id || `${spot.dx_call}|${spot.freq}|${spot.time_iso}`, spot);
+    }
   }
 
-  if (!upstreamResponse.ok) {
-    const retryAfterMs = setSpotholeBackoff({
-      status: upstreamResponse.status,
-      retryAfterMs: spotholeBackoffMsForResponse(upstreamResponse)
-    });
-    sendJson(response, upstreamResponse.status === 429 ? 429 : 503, {
-      ok: false,
-      error: `Spothole returned HTTP ${upstreamResponse.status}. Pausing requests for ${Math.ceil(retryAfterMs / 1000)} seconds.`,
-      retryAfterMs
-    });
-    return;
-  }
-
-  const spots = await upstreamResponse.json();
+  const spots = Array.from(spotsById.values());
   const visibleSpots = spots.filter(spot => !isQrtSpot(spot));
   sendJson(response, 200, await enrichPotaReferenceDetails(visibleSpots));
 }
@@ -828,6 +892,7 @@ function handleConfig(response) {
   sendJson(response, 200, {
     cwTxOffsetHz: normalizeVfoOffsetHz(CW_TX_OFFSET_HZ),
     spotAgeSeconds: DEFAULT_SPOT_AGE_SECONDS,
+    spotLimit: Math.min(Math.max(Math.trunc(DEFAULT_SPOT_LIMIT), 1), MAX_SPOT_LIMIT),
     scanDelaySeconds: DEFAULT_SCAN_DELAY_SECONDS,
     potaSpotTarget: POTA_SPOT_TARGET === "dxcluster" ? "dxcluster" : "pota"
   });
@@ -837,7 +902,7 @@ async function handleTune(request, response) {
   const rawBody = await getRequestBody(request);
   const body = rawBody ? JSON.parse(rawBody) : {};
   const cwTxOffsetHz = normalizeVfoOffsetHz(body.vfoOffsetHz ?? body.cwTxOffsetHz ?? CW_TX_OFFSET_HZ);
-  const commands = buildTuneCommands({ freqHz: body.freq, mode: body.mode || body.mode_type, cwTxOffsetHz });
+  const commands = buildTuneCommands({ freqHz: body.freq, mode: effectiveSpotMode(body), cwTxOffsetHz });
   const host = DEFAULT_COMMANDER_HOST;
   const port = DEFAULT_COMMANDER_PORT;
 
