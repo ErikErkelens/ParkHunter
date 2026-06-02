@@ -38,7 +38,7 @@ let appConfig = {
   cwTxOffsetHz: 90,
   spotAgeSeconds: 1800,
   spotLimit: 500,
-  scanDelaySeconds: 3
+  scanDelaySeconds: 2
 };
 let logState = loadLogState();
 let stationState = loadStationState();
@@ -931,6 +931,9 @@ function handleKeydown(event) {
     } else if (event.key === " ") {
       event.preventDefault();
       advanceScan({ markTried: false });
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      stopScan();
     }
     return;
   }

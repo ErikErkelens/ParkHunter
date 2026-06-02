@@ -57,7 +57,7 @@ Useful operating defaults:
 - `CW_TX_OFFSET_HZ`: CW transmit offset used for Commander's split command. Default `90`.
 - `SPOT_AGE_SECONDS`: initial spot age filter. Default `1800`, or 30 minutes. Accepted UI values are `900`, `1800`, and `3600`.
 - `SPOT_LIMIT`: number of recent Spothole spots requested per refresh. Default `500`, capped at `1000`.
-- `SCAN_DELAY_SECONDS`: scan auto-advance delay. Default `3`.
+- `SCAN_DELAY_SECONDS`: scan auto-advance delay. Default `2`.
 
 Optional spot enrichment:
 
@@ -113,6 +113,7 @@ ParkHunter remembers logs and tried spots in browser local storage for the curre
 - `3` / `4` / `5` / `7` / `9`: in the log dialog, choose `339` / `449` / `559` / `579` / `599`; `539` is available as a button
 - `S`: start scan from the main screen; skip current spot in the scan dialog
 - `Space`: next spot in the scan dialog
+- `Esc`: stop scanning
 - `?`: show shortcuts
 
 ## Acknowledgements
