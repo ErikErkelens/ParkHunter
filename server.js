@@ -262,23 +262,32 @@ async function refreshPotaBearerToken() {
     return potaBearerToken;
   }
 
-  const response = await fetch(`https://cognito-idp.${POTA_COGNITO_REGION}.amazonaws.com/`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-amz-json-1.1",
-      "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth"
-    },
-    body: JSON.stringify({
-      AuthFlow: "REFRESH_TOKEN_AUTH",
-      ClientId: POTA_COGNITO_CLIENT_ID,
-      AuthParameters: {
-        REFRESH_TOKEN: POTA_REFRESH_TOKEN
-      }
-    })
-  });
-  const body = await response.json().catch(() => ({}));
+  const cognitoUrl = `https://cognito-idp.${POTA_COGNITO_REGION}.amazonaws.com/`;
+  let response;
+  try {
+    response = await fetch(cognitoUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-amz-json-1.1",
+        "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth"
+      },
+      body: JSON.stringify({
+        AuthFlow: "REFRESH_TOKEN_AUTH",
+        ClientId: POTA_COGNITO_CLIENT_ID,
+        AuthParameters: {
+          REFRESH_TOKEN: POTA_REFRESH_TOKEN
+        }
+      })
+    });
+  } catch (error) {
+    logApiNetworkError({ apiName: "POTA Cognito", url: cognitoUrl, error });
+    throw error;
+  }
+
+  const body = await readApiBody(response);
 
   if (!response.ok || !body.AuthenticationResult?.AccessToken) {
+    logApiHttpError({ apiName: "POTA Cognito", response, url: cognitoUrl, body });
     throw new Error(body.message || body.__type || `Cognito returned HTTP ${response.status}.`);
   }
 
@@ -316,11 +325,19 @@ async function getQrzSessionKey() {
   loginUrl.searchParams.set("username", QRZ_USERNAME);
   loginUrl.searchParams.set("password", QRZ_PASSWORD);
 
-  const response = await fetch(loginUrl);
+  let response;
+  try {
+    response = await fetch(loginUrl);
+  } catch (error) {
+    logApiNetworkError({ apiName: "QRZ", url: loginUrl, error });
+    throw error;
+  }
+
   const xml = await response.text();
   const error = decodeXmlText(xmlText(xml, "Error"));
 
   if (!response.ok || error) {
+    logApiHttpError({ apiName: "QRZ", response, url: loginUrl, body: xml });
     throw new Error(error || `QRZ login returned HTTP ${response.status}.`);
   }
 
@@ -492,6 +509,70 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function redactedApiUrl(input) {
+  const url = new URL(String(input));
+  for (const key of url.searchParams.keys()) {
+    if (/password|token|key|session/i.test(key)) {
+      url.searchParams.set(key, "[redacted]");
+    }
+  }
+  return url.toString();
+}
+
+function formatApiBodyDetail(body) {
+  const text = typeof body === "string" ? body : JSON.stringify(body);
+  if (!text) {
+    return "";
+  }
+
+  return text.length > 1200 ? `${text.slice(0, 1200)}...` : text;
+}
+
+function parseApiBodyText(text) {
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return text;
+  }
+}
+
+async function readApiBody(response) {
+  return parseApiBodyText(await response.text());
+}
+
+function logApiHttpError({ apiName, response, url, body, retryAfterMs }) {
+  const details = [
+    `[${new Date().toISOString()}] ${apiName} API returned HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}.`,
+    `URL: ${redactedApiUrl(url)}`
+  ];
+  const retryAfter = response.headers.get("Retry-After");
+  if (retryAfter) {
+    details.push(`Retry-After: ${retryAfter}`);
+  }
+  if (retryAfterMs !== undefined) {
+    details.push(`Backoff: ${Math.ceil(retryAfterMs / 1000)} seconds`);
+  }
+
+  const bodyDetail = formatApiBodyDetail(body);
+  if (bodyDetail) {
+    details.push(`Response body: ${bodyDetail}`);
+  }
+
+  console.error(details.join("\n"));
+}
+
+function logApiNetworkError({ apiName, url, error, retryAfterMs }) {
+  const details = [
+    `[${new Date().toISOString()}] ${apiName} API network error: ${error.message || error}.`,
+    `URL: ${redactedApiUrl(url)}`
+  ];
+  if (retryAfterMs !== undefined) {
+    details.push(`Backoff: ${Math.ceil(retryAfterMs / 1000)} seconds`);
+  }
+
+  console.error(details.join("\n"));
+}
+
 function parseRetryAfterMs(value) {
   const retryAfter = String(value || "").trim();
   if (!retryAfter) {
@@ -628,27 +709,28 @@ function sendDxClusterCommand({ host, port, username, command }) {
 }
 
 async function sendPotaSpot({ token, payload }) {
-  const response = await fetch(POTA_SPOT_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      "User-Agent": "ParkHunter/0.1"
-    },
-    body: JSON.stringify(payload)
-  });
-  const text = await response.text();
-  let body = text;
-
+  let response;
   try {
-    body = text ? JSON.parse(text) : {};
-  } catch {
-    // Some API failures may return plain text.
+    response = await fetch(POTA_SPOT_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "ParkHunter/0.1"
+      },
+      body: JSON.stringify(payload)
+    });
+  } catch (error) {
+    logApiNetworkError({ apiName: "POTA spot", url: POTA_SPOT_URL, error });
+    throw error;
   }
 
+  const body = await readApiBody(response);
+
   if (!response.ok) {
-    throw new Error(`POTA returned HTTP ${response.status}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+    logApiHttpError({ apiName: "POTA spot", response, url: POTA_SPOT_URL, body });
+    throw new Error(`POTA returned HTTP ${response.status}: ${formatApiBodyDetail(body)}`);
   }
 
   return body;
@@ -702,14 +784,26 @@ async function savePotaReferenceCache() {
 async function refreshPotaReferenceCache() {
   await loadPotaReferenceCache();
 
-  const response = await fetch(POTA_ACTIVATOR_SPOTS_URL, {
-    headers: {
-      "Accept": "application/json",
-      "User-Agent": "ParkHunter/0.1"
-    }
-  });
+  let response;
+  try {
+    response = await fetch(POTA_ACTIVATOR_SPOTS_URL, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "ParkHunter/0.1"
+      }
+    });
+  } catch (error) {
+    logApiNetworkError({ apiName: "POTA activator spots", url: POTA_ACTIVATOR_SPOTS_URL, error });
+    throw error;
+  }
 
   if (!response.ok) {
+    logApiHttpError({
+      apiName: "POTA activator spots",
+      response,
+      url: POTA_ACTIVATOR_SPOTS_URL,
+      body: await readApiBody(response)
+    });
     return;
   }
 
@@ -843,6 +937,7 @@ async function handleSpots(request, response) {
         status: "network error",
         retryAfterMs: SPOTHOLE_ERROR_BACKOFF_MS
       });
+      logApiNetworkError({ apiName: "Spothole", url: upstreamUrl, error, retryAfterMs });
       sendJson(response, 503, {
         ok: false,
         error: `Could not reach Spothole: ${error.message}. Pausing requests for ${Math.ceil(retryAfterMs / 1000)} seconds.`,
@@ -855,6 +950,13 @@ async function handleSpots(request, response) {
       const retryAfterMs = setSpotholeBackoff({
         status: upstreamResponse.status,
         retryAfterMs: spotholeBackoffMsForResponse(upstreamResponse)
+      });
+      logApiHttpError({
+        apiName: "Spothole",
+        response: upstreamResponse,
+        url: upstreamUrl,
+        body: await readApiBody(upstreamResponse),
+        retryAfterMs
       });
       sendJson(response, upstreamResponse.status === 429 ? 429 : 503, {
         ok: false,
@@ -1063,6 +1165,7 @@ export async function routeRequest(request, response) {
 
     sendJson(response, 405, { ok: false, error: "Method not allowed." });
   } catch (error) {
+    console.error(`[${new Date().toISOString()}] ParkHunter local server error: ${error.stack || error.message || error}`);
     sendJson(response, 500, { ok: false, error: error.message || "Unexpected server error." });
   }
 }
