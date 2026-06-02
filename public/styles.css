@@ -76,7 +76,7 @@ h1 {
   align-items: end;
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(6, minmax(130px, 1fr));
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
 }
 
 label {
@@ -98,13 +98,69 @@ select {
   padding: 8px 10px;
 }
 
-.status-row {
+.sticky-action-rail {
+  align-items: center;
+  background: rgba(247, 248, 250, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(31, 42, 55, 0.06);
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(42px, 1fr) minmax(260px, 2fr) minmax(120px, 1fr);
+  min-height: 50px;
+  padding: 7px 9px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.rail-refresh,
+.rail-scan {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.rail-refresh {
+  justify-content: flex-start;
+}
+
+.rail-scan {
+  justify-content: flex-end;
+}
+
+.rail-icon-button {
+  background: #ffffff;
+  border-color: var(--line);
+  color: var(--text);
+  height: 36px;
+  width: 36px;
+}
+
+.rail-icon-button:hover {
+  background: #edf1f5;
+}
+
+.rail-status {
   align-items: center;
   color: var(--muted);
   display: flex;
-  font-size: 0.9rem;
-  justify-content: space-between;
-  min-height: 28px;
+  font-size: 0.86rem;
+  gap: 12px;
+  justify-content: center;
+  min-width: 0;
+  text-align: center;
+}
+
+.rail-status span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-status span:last-child {
+  flex: 0 0 auto;
 }
 
 .spot-table-wrap {
@@ -134,8 +190,6 @@ th {
   color: #4a5562;
   font-size: 0.78rem;
   font-weight: 800;
-  position: sticky;
-  top: 0;
   text-transform: uppercase;
 }
 
@@ -502,15 +556,32 @@ tr.logged-exact td:not(:last-child) {
     grid-template-columns: 1fr 1fr;
   }
 
-  .status-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 4px;
+  .sticky-action-rail {
+    align-items: stretch;
+    gap: 8px;
+    grid-template-columns: 42px minmax(0, 1fr) minmax(96px, auto);
   }
+
+  .rail-status {
+    justify-content: center;
+  }
+
 }
 
 @media (max-width: 520px) {
   .controls {
     grid-template-columns: 1fr;
+  }
+
+  .sticky-action-rail {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .rail-scan {
+    grid-column: 1 / -1;
+  }
+
+  .rail-scan .scan-button {
+    width: 100%;
   }
 }

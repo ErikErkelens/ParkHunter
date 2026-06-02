@@ -1,14 +1,15 @@
 const spotsBody = document.querySelector("#spotsBody");
 const spotRowTemplate = document.querySelector("#spotRowTemplate");
 const refreshButton = document.querySelector("#refreshButton");
-const statusText = document.querySelector("#statusText");
-const lastUpdated = document.querySelector("#lastUpdated");
+const railRefreshButton = document.querySelector("#railRefreshButton");
+const statusText = document.querySelector("#railStatusText");
+const lastUpdated = document.querySelector("#railLastUpdated");
 const ageSelect = document.querySelector("#ageSelect");
 const modeSelect = document.querySelector("#modeSelect");
 const bandSelect = document.querySelector("#bandSelect");
 const vfoOffsetHz = document.querySelector("#vfoOffsetHz");
 const scanDelaySeconds = document.querySelector("#scanDelaySeconds");
-const scanButton = document.querySelector("#scanButton");
+const railScanButton = document.querySelector("#railScanButton");
 const scanDialog = document.querySelector("#scanDialog");
 const scanStation = document.querySelector("#scanStation");
 const scanReference = document.querySelector("#scanReference");
@@ -336,6 +337,12 @@ function renderCallCell(cell, spot) {
 function setStatus(message, isError = false) {
   statusText.textContent = message;
   statusText.classList.toggle("error", isError);
+}
+
+function updateScanButtons() {
+  const label = scanState.active ? "Scanning..." : "Scan";
+  railScanButton.textContent = label;
+  railScanButton.disabled = scanState.active;
 }
 
 function renderEmpty(message) {
@@ -700,6 +707,7 @@ function scheduleScanAdvance() {
 function stopScan(message = "Scan stopped.") {
   clearScanTimer();
   scanState = { active: false, currentIndex: -1, currentSpot: undefined };
+  updateScanButtons();
   if (scanDialog.open) {
     scanDialog.close();
   }
@@ -760,11 +768,14 @@ async function startScan() {
     }
 
     scanState = { active: true, currentIndex: -1, currentSpot: undefined };
+    updateScanButtons();
     if (typeof scanDialog.showModal === "function") {
       scanDialog.showModal();
     }
     await tuneScanSpot(firstIndex);
   } catch (error) {
+    scanState = { active: false, currentIndex: -1, currentSpot: undefined };
+    updateScanButtons();
     setStatus(`Could not start scan: ${error.message}`, true);
   }
 }
@@ -820,6 +831,7 @@ async function loadSpots() {
   refreshUtcLogState();
   refreshUtcStationState();
   refreshButton.disabled = true;
+  railRefreshButton.disabled = true;
   setStatus("Loading spots...");
 
   try {
@@ -858,6 +870,7 @@ async function loadSpots() {
       : DEFAULT_REFRESH_MS;
   } finally {
     refreshButton.disabled = false;
+    railRefreshButton.disabled = false;
   }
 }
 
@@ -945,10 +958,11 @@ function handleKeydown(event) {
 }
 
 refreshButton.addEventListener("click", loadSpots);
+railRefreshButton.addEventListener("click", loadSpots);
 ageSelect.addEventListener("change", loadSpots);
 modeSelect.addEventListener("change", loadSpots);
 bandSelect.addEventListener("change", loadSpots);
-scanButton.addEventListener("click", startScan);
+railScanButton.addEventListener("click", startScan);
 stopScanButton.addEventListener("click", () => stopScan());
 skipScanButton.addEventListener("click", () => {
   advanceScan({ markTried: true });
