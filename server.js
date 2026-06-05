@@ -51,6 +51,8 @@ const MAX_VFO_OFFSET_HZ = 5000;
 const QRZ_USERNAME = process.env.QRZ_USERNAME || "";
 const QRZ_PASSWORD = process.env.QRZ_PASSWORD || "";
 const QRZ_BASE_URL = process.env.QRZ_BASE_URL || "https://xmldata.qrz.com/xml/current/";
+const QRZ_SESSION_TTL_MS = Number(process.env.QRZ_SESSION_TTL_MS || 55 * 60 * 1000);
+const QRZ_CALLSIGN_NAME_CONCURRENCY = Number(process.env.QRZ_CALLSIGN_NAME_CONCURRENCY || 6);
 const DXCLUSTER_HOST = process.env.DXCLUSTER_HOST || "dx.cqspot.com";
 const DXCLUSTER_PORT = Number(process.env.DXCLUSTER_PORT || 1234);
 const DXCLUSTER_USERNAME = process.env.DXCLUSTER_USERNAME || QRZ_USERNAME || "";
@@ -60,6 +62,8 @@ const POTA_ACTIVATOR_SPOTS_URL = process.env.POTA_ACTIVATOR_SPOTS_URL || "https:
 const CACHE_DIR = process.env.CACHE_DIR || path.join(__dirname, ".cache");
 const POTA_REFERENCE_CACHE_PATH = process.env.POTA_REFERENCE_CACHE_PATH || path.join(CACHE_DIR, "pota-references.json");
 const POTA_REFERENCE_CACHE_TTL_MS = Number(process.env.POTA_REFERENCE_CACHE_TTL_MS || 10 * 60 * 1000);
+const QRZ_CALLSIGN_NAME_CACHE_PATH = process.env.QRZ_CALLSIGN_NAME_CACHE_PATH || path.join(CACHE_DIR, "qrz-names.json");
+const QRZ_CALLSIGN_NAME_CACHE_TTL_MS = Number(process.env.QRZ_CALLSIGN_NAME_CACHE_TTL_MS || 60 * 24 * 60 * 60 * 1000);
 let potaBearerToken = process.env.POTA_BEARER_TOKEN || "";
 const POTA_REFRESH_TOKEN = process.env.POTA_REFRESH_TOKEN || "";
 const POTA_COGNITO_CLIENT_ID = process.env.POTA_COGNITO_CLIENT_ID || "7hluqct0n2nckib7i7sd5753oa";
@@ -72,6 +76,11 @@ const POTA_SPOT_SOURCE = /^ParkHunter\s+-\s+/i.test(CONFIGURED_POTA_SPOT_SOURCE)
 const POTA_SPOT_TARGET = String(process.env.POTA_SPOT_TARGET || "pota").trim().toLowerCase();
 
 let qrzSessionKey = "";
+let qrzSessionKeyAcquiredAt = 0;
+let qrzSessionKeyRefreshPromise;
+let qrzCallsignNameCacheLoaded = false;
+let qrzCallsignNameCacheSavePromise = Promise.resolve();
+const qrzCallsignNameCache = new Map();
 let potaReferenceCacheLoaded = false;
 let potaReferenceCacheUpdatedAt = 0;
 let potaReferenceCache = new Map();
@@ -313,7 +322,10 @@ export function isQrtSpot(spot) {
 }
 
 async function getQrzSessionKey() {
-  if (qrzSessionKey) {
+  const sessionTtlMs = Number.isFinite(QRZ_SESSION_TTL_MS) && QRZ_SESSION_TTL_MS > 0
+    ? QRZ_SESSION_TTL_MS
+    : 55 * 60 * 1000;
+  if (qrzSessionKey && Date.now() - qrzSessionKeyAcquiredAt < sessionTtlMs) {
     return qrzSessionKey;
   }
 
@@ -321,6 +333,17 @@ async function getQrzSessionKey() {
     return "";
   }
 
+  if (!qrzSessionKeyRefreshPromise) {
+    qrzSessionKeyRefreshPromise = refreshQrzSessionKey()
+      .finally(() => {
+        qrzSessionKeyRefreshPromise = undefined;
+      });
+  }
+
+  return qrzSessionKeyRefreshPromise;
+}
+
+async function refreshQrzSessionKey() {
   const loginUrl = new URL(QRZ_BASE_URL);
   loginUrl.searchParams.set("username", QRZ_USERNAME);
   loginUrl.searchParams.set("password", QRZ_PASSWORD);
@@ -335,14 +358,207 @@ async function getQrzSessionKey() {
 
   const xml = await response.text();
   const error = decodeXmlText(xmlText(xml, "Error"));
+  const key = xmlText(xml, "Key");
 
-  if (!response.ok || error) {
+  if (!response.ok || error || !key) {
     logApiHttpError({ apiName: "QRZ", response, url: loginUrl, body: xml });
-    throw new Error(error || `QRZ login returned HTTP ${response.status}.`);
+    qrzSessionKey = "";
+    qrzSessionKeyAcquiredAt = 0;
+    throw new Error(error || `QRZ login returned HTTP ${response.status} without a session key.`);
   }
 
-  qrzSessionKey = xmlText(xml, "Key");
+  qrzSessionKey = key;
+  qrzSessionKeyAcquiredAt = Date.now();
   return qrzSessionKey;
+}
+
+function qrzLookupCallsign(call) {
+  return String(call || "")
+    .trim()
+    .toUpperCase()
+    .replace(/-\d+$/, "");
+}
+
+function qrzNameFromXml(xml) {
+  const nickname = decodeXmlText(xmlText(xml, "nickname")).trim();
+  if (nickname) {
+    return nickname;
+  }
+
+  return [
+    decodeXmlText(xmlText(xml, "fname")).trim(),
+    decodeXmlText(xmlText(xml, "name")).trim()
+  ].filter(Boolean).join(" ");
+}
+
+function qrzCallsignNameCacheTtlMs() {
+  return Number.isFinite(QRZ_CALLSIGN_NAME_CACHE_TTL_MS) && QRZ_CALLSIGN_NAME_CACHE_TTL_MS > 0
+    ? QRZ_CALLSIGN_NAME_CACHE_TTL_MS
+    : 60 * 24 * 60 * 60 * 1000;
+}
+
+function pruneQrzCallsignNameCache() {
+  const staleBefore = Date.now() - qrzCallsignNameCacheTtlMs();
+  for (const [call, entry] of qrzCallsignNameCache.entries()) {
+    if (!entry?.lastCalledAt || entry.lastCalledAt < staleBefore) {
+      qrzCallsignNameCache.delete(call);
+    }
+  }
+}
+
+async function loadQrzCallsignNameCache() {
+  if (qrzCallsignNameCacheLoaded) {
+    return;
+  }
+
+  qrzCallsignNameCacheLoaded = true;
+
+  try {
+    const cacheFile = JSON.parse(await readFile(QRZ_CALLSIGN_NAME_CACHE_PATH, "utf8"));
+    const entries = cacheFile.callsigns || {};
+    for (const [call, entry] of Object.entries(entries)) {
+      qrzCallsignNameCache.set(qrzLookupCallsign(call), {
+        name: String(entry?.name || ""),
+        lastCalledAt: Number(entry?.lastCalledAt || 0)
+      });
+    }
+    pruneQrzCallsignNameCache();
+  } catch {
+    qrzCallsignNameCache.clear();
+  }
+}
+
+async function saveQrzCallsignNameCache() {
+  qrzCallsignNameCacheSavePromise = qrzCallsignNameCacheSavePromise.catch(() => {}).then(async () => {
+    pruneQrzCallsignNameCache();
+    await mkdir(path.dirname(QRZ_CALLSIGN_NAME_CACHE_PATH), { recursive: true });
+    await writeFile(QRZ_CALLSIGN_NAME_CACHE_PATH, JSON.stringify({
+      updatedAt: Date.now(),
+      callsigns: Object.fromEntries(qrzCallsignNameCache)
+    }, null, 2));
+  });
+  await qrzCallsignNameCacheSavePromise;
+}
+
+async function getCachedQrzCallsignName(call) {
+  await loadQrzCallsignNameCache();
+  const cached = qrzCallsignNameCache.get(call);
+  if (!cached || !cached.lastCalledAt || Date.now() - cached.lastCalledAt > qrzCallsignNameCacheTtlMs()) {
+    qrzCallsignNameCache.delete(call);
+    return undefined;
+  }
+
+  cached.lastCalledAt = Date.now();
+  await saveQrzCallsignNameCache();
+  return cached.name;
+}
+
+async function cacheQrzCallsignName(call, name) {
+  await loadQrzCallsignNameCache();
+  qrzCallsignNameCache.set(call, {
+    name: String(name || ""),
+    lastCalledAt: Date.now()
+  });
+  await saveQrzCallsignNameCache();
+}
+
+async function lookupQrzCallsignName(call, { allowSessionRefresh = true } = {}) {
+  const lookupCall = qrzLookupCallsign(call);
+  if (!lookupCall || !QRZ_USERNAME || !QRZ_PASSWORD) {
+    return "";
+  }
+
+  const cachedName = await getCachedQrzCallsignName(lookupCall);
+  if (cachedName !== undefined) {
+    return cachedName;
+  }
+
+  const sessionKey = await getQrzSessionKey();
+  if (!sessionKey) {
+    return "";
+  }
+
+  const lookupUrl = new URL(QRZ_BASE_URL);
+  lookupUrl.searchParams.set("s", sessionKey);
+  lookupUrl.searchParams.set("callsign", lookupCall);
+
+  let response;
+  try {
+    response = await fetch(lookupUrl);
+  } catch (error) {
+    logApiNetworkError({ apiName: "QRZ callsign", url: lookupUrl, error });
+    throw error;
+  }
+
+  const xml = await response.text();
+  const error = decodeXmlText(xmlText(xml, "Error"));
+  if (!response.ok || error) {
+    if (allowSessionRefresh && /session|key/i.test(error)) {
+      qrzSessionKey = "";
+      qrzSessionKeyAcquiredAt = 0;
+      return lookupQrzCallsignName(lookupCall, { allowSessionRefresh: false });
+    }
+
+    if (/not found/i.test(error)) {
+      await cacheQrzCallsignName(lookupCall, "");
+      return "";
+    }
+
+    logApiHttpError({ apiName: "QRZ callsign", response, url: lookupUrl, body: xml });
+    await cacheQrzCallsignName(lookupCall, "");
+    return "";
+  }
+
+  const name = qrzNameFromXml(xml);
+  await cacheQrzCallsignName(lookupCall, name);
+  return name;
+}
+
+async function enrichMissingQrzNames(spots) {
+  const missingCalls = Array.from(new Set(spots
+    .filter(spot => spot.dx_call && !spot.dx_name)
+    .map(spot => qrzLookupCallsign(spot.dx_call))
+    .filter(Boolean)));
+
+  if (missingCalls.length === 0 || !QRZ_USERNAME || !QRZ_PASSWORD) {
+    return spots;
+  }
+
+  const namesByCall = new Map();
+  const concurrency = Number.isFinite(QRZ_CALLSIGN_NAME_CONCURRENCY) && QRZ_CALLSIGN_NAME_CONCURRENCY > 0
+    ? Math.trunc(QRZ_CALLSIGN_NAME_CONCURRENCY)
+    : 6;
+  let nextCallIndex = 0;
+
+  async function lookupNextCall() {
+    while (nextCallIndex < missingCalls.length) {
+      const call = missingCalls[nextCallIndex];
+      nextCallIndex += 1;
+
+      try {
+        const name = await lookupQrzCallsignName(call);
+        if (name) {
+          namesByCall.set(call, name);
+        }
+      } catch {
+        // QRZ name fallback is optional; spots should still load if it fails.
+      }
+    }
+  }
+
+  await Promise.all(Array.from(
+    { length: Math.min(concurrency, missingCalls.length) },
+    () => lookupNextCall()
+  ));
+
+  if (namesByCall.size === 0) {
+    return spots;
+  }
+
+  return spots.map(spot => {
+    const name = namesByCall.get(qrzLookupCallsign(spot.dx_call));
+    return name && !spot.dx_name ? { ...spot, dx_name: name } : spot;
+  });
 }
 
 function utcLogParts(date = new Date()) {
@@ -512,7 +728,7 @@ function sendJson(response, statusCode, payload) {
 function redactedApiUrl(input) {
   const url = new URL(String(input));
   for (const key of url.searchParams.keys()) {
-    if (/password|token|key|session/i.test(key)) {
+    if (/password|token|key|session/i.test(key) || (url.hostname.includes("qrz.com") && key === "s")) {
       url.searchParams.set(key, "[redacted]");
     }
   }
@@ -520,7 +736,9 @@ function redactedApiUrl(input) {
 }
 
 function formatApiBodyDetail(body) {
-  const text = typeof body === "string" ? body : JSON.stringify(body);
+  const text = (typeof body === "string" ? body : JSON.stringify(body))
+    ?.replace(/<Key>[\s\S]*?<\/Key>/gi, "<Key>[redacted]</Key>")
+    .replace(/<SessionID>[\s\S]*?<\/SessionID>/gi, "<SessionID>[redacted]</SessionID>");
   if (!text) {
     return "";
   }
@@ -913,15 +1131,6 @@ async function handleSpots(request, response) {
     upstreamUrls.forEach(upstreamUrl => upstreamUrl.searchParams.set("band", band));
   }
 
-  try {
-    const qrzSessionKey = await getQrzSessionKey();
-    if (qrzSessionKey) {
-      upstreamUrls.forEach(upstreamUrl => upstreamUrl.searchParams.set("qrz_session_key", qrzSessionKey));
-    }
-  } catch {
-    // Callsign enrichment is optional; spots should still load if QRZ is unavailable.
-  }
-
   const spotsById = new Map();
   for (const upstreamUrl of upstreamUrls) {
     let upstreamResponse;
@@ -987,7 +1196,8 @@ async function handleSpots(request, response) {
 
   const spots = Array.from(spotsById.values());
   const visibleSpots = spots.filter(spot => !isQrtSpot(spot));
-  sendJson(response, 200, await enrichPotaReferenceDetails(visibleSpots));
+  const spotsWithReferenceDetails = await enrichPotaReferenceDetails(visibleSpots);
+  sendJson(response, 200, await enrichMissingQrzNames(spotsWithReferenceDetails));
 }
 
 function handleConfig(response) {
