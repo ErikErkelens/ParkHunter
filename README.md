@@ -129,7 +129,7 @@ ParkHunter remembers logs and tried spots in browser local storage for the curre
 
 ## Acknowledgements
 
-ParkHunter depends on Spothole's free spot aggregation API. Spothole is written by Ian Renton, MØTRT, and contributors. See the [Spothole site](https://spothole.app/), [About page](https://spothole.app/about), and [API documentation](https://spothole.app/apidocs).
+ParkHunter depends on Spothole's free v2 spot aggregation API. Spothole is written by Ian Renton, MØTRT, and contributors. See the [Spothole site](https://spothole.app/), [About page](https://spothole.app/about), and [API documentation](https://spothole.app/apidocs).
 
 ParkHunter controls and logs through DXLab Suite, written by Dave Bernstein, AA6YQ. See the [DXLab Suite site](https://dxlabsuite.com/) and [DXLab wiki](https://www.dxlabsuite.com/dxlabwiki/).
 

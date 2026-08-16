@@ -34,6 +34,7 @@ loadLocalEnv();
 const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT || 3000);
 const SPOTHOLE_BASE_URL = process.env.SPOTHOLE_BASE_URL || "https://spothole.app";
+const SPOTHOLE_SPOTS_PATH = "/api/v2/spots";
 const SPOTHOLE_REFRESH_MS = Number(process.env.SPOTHOLE_REFRESH_MS || 30000);
 const SPOTHOLE_RATE_LIMIT_BACKOFF_MS = Number(process.env.SPOTHOLE_RATE_LIMIT_BACKOFF_MS || 10 * 60 * 1000);
 const SPOTHOLE_ERROR_BACKOFF_MS = Number(process.env.SPOTHOLE_ERROR_BACKOFF_MS || 2 * 60 * 1000);
@@ -1097,7 +1098,7 @@ async function handleSpots(request, response) {
   const requestedModeType = String(requestUrl.searchParams.get("mode_type") || "CW").trim().toUpperCase();
   const modeTypes = requestedModeType === "PHONE" ? ["PHONE"] : ["CW", "PHONE"];
   const upstreamUrls = modeTypes.map(modeType => {
-    const upstreamUrl = new URL("/api/v1/spots", SPOTHOLE_BASE_URL);
+    const upstreamUrl = new URL(SPOTHOLE_SPOTS_PATH, SPOTHOLE_BASE_URL);
     upstreamUrl.searchParams.set("sig", requestUrl.searchParams.get("sig") || "POTA,SOTA,WWFF");
     upstreamUrl.searchParams.set("mode_type", modeType);
     upstreamUrl.searchParams.set("limit", String(spotLimit));
