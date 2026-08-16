@@ -6,8 +6,9 @@ const statusText = document.querySelector("#railStatusText");
 const lastUpdated = document.querySelector("#railLastUpdated");
 const ageSelect = document.querySelector("#ageSelect");
 const modeSelect = document.querySelector("#modeSelect");
-const bandSelect = document.querySelector("#bandSelect");
-const vfoOffsetHz = document.querySelector("#vfoOffsetHz");
+const skipAsiaCheckbox = document.querySelector("#skipAsiaCheckbox");
+const skipEuropeCheckbox = document.querySelector("#skipEuropeCheckbox");
+const xitSequenceCheckbox = document.querySelector("#xitSequenceCheckbox");
 const scanDelaySeconds = document.querySelector("#scanDelaySeconds");
 const railScanButton = document.querySelector("#railScanButton");
 const scanDialog = document.querySelector("#scanDialog");
@@ -29,26 +30,57 @@ const spotCommentInput = document.querySelector("#spotCommentInput");
 const spotAfterLogCheckbox = document.querySelector("#spotAfterLogCheckbox");
 const MAX_SCANNABLE_FREQ_HZ = 54000000;
 const DEFAULT_REFRESH_MS = 30000;
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const TUNED_SYNC_MS = 2000;
+const SKIP_CONTINENTS_STORAGE_KEY = "parkhunter.skipContinents.v1";
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  });
+}
 
 let refreshTimer;
+let idleTimer;
+let tunedSyncTimer;
 let scanTimer;
+let spotLoadPromise;
 let nextRefreshDelayMs = DEFAULT_REFRESH_MS;
+let isClientIdle = false;
 let currentSpots = [];
 let appConfig = {
-  cwTxOffsetHz: 90,
+  commanderXitSequenceName: "xit",
+  useCommanderXitSequence: true,
   spotAgeSeconds: 1800,
   spotLimit: 500,
   scanDelaySeconds: 2
 };
+let skipContinents = loadSkipContinents();
 let logState = loadLogState();
 let stationState = loadStationState();
 let pendingLogSpot;
-let scanState = { active: false, currentIndex: -1, currentSpot: undefined };
+let scanState = { active: false, currentIndex: -1, currentSpot: undefined, scannedKeys: new Set(), advancing: false };
 let selectedSpotKey = "";
 let lastDefaultSpotComment = defaultSpotComment("559");
 
 function utcDayKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
+}
+
+function loadSkipContinents() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SKIP_CONTINENTS_STORAGE_KEY) || "{}");
+    return {
+      AS: Boolean(parsed.AS),
+      EU: Boolean(parsed.EU)
+    };
+  } catch {
+    return { AS: false, EU: false };
+  }
+}
+
+function saveSkipContinents() {
+  localStorage.setItem(SKIP_CONTINENTS_STORAGE_KEY, JSON.stringify(skipContinents));
 }
 
 function loadLogState() {
@@ -86,14 +118,15 @@ function loadStationState() {
       return {
         utcDay: parsed.utcDay,
         tunedKey: parsed.tunedKey || "",
-        tried: parsed.tried || {}
+        tried: parsed.tried || {},
+        autoTried: parsed.autoTried || {}
       };
     }
   } catch {
     // Ignore malformed local state and start a fresh UTC day.
   }
 
-  return { utcDay: utcDayKey(), tunedKey: "", tried: {} };
+  return { utcDay: utcDayKey(), tunedKey: "", tried: {}, autoTried: {} };
 }
 
 function saveStationState() {
@@ -102,7 +135,7 @@ function saveStationState() {
 
 function refreshUtcStationState() {
   if (stationState.utcDay !== utcDayKey()) {
-    stationState = { utcDay: utcDayKey(), tunedKey: "", tried: {} };
+    stationState = { utcDay: utcDayKey(), tunedKey: "", tried: {}, autoTried: {} };
     saveStationState();
   }
 }
@@ -170,8 +203,11 @@ async function loadConfig() {
     setStatus(`Could not load configuration defaults: ${error.message}`, true);
   }
 
-  vfoOffsetHz.value = String(appConfig.cwTxOffsetHz);
+  xitSequenceCheckbox.checked = Boolean(appConfig.useCommanderXitSequence);
+  xitSequenceCheckbox.title = `Run Commander sequence "${appConfig.commanderXitSequenceName}" after CW tuning`;
   scanDelaySeconds.value = String(appConfig.scanDelaySeconds);
+  skipAsiaCheckbox.checked = skipContinents.AS;
+  skipEuropeCheckbox.checked = skipContinents.EU;
   if (Array.from(ageSelect.options).some(option => option.value === String(appConfig.spotAgeSeconds))) {
     ageSelect.value = String(appConfig.spotAgeSeconds);
   }
@@ -189,15 +225,6 @@ function selectSignalReport(report) {
     lastDefaultSpotComment = defaultSpotComment(cleanReport);
     spotCommentInput.value = lastDefaultSpotComment;
   }
-}
-
-function cleanVfoOffsetHz() {
-  const offset = Number(vfoOffsetHz.value || appConfig.cwTxOffsetHz);
-  if (!Number.isInteger(offset) || offset < -5000 || offset > 5000) {
-    throw new Error("VFO offset must be a whole number from -5000 to 5000 Hz.");
-  }
-
-  return offset;
 }
 
 function cleanScanDelayMs() {
@@ -258,8 +285,37 @@ function normalizeBand(band) {
   return String(band || "").trim().toUpperCase();
 }
 
+function normalizeContinent(continent) {
+  return String(continent || "").trim().toUpperCase();
+}
+
 function loggedKey(spot) {
   return [normalizeCall(spot.dx_call), Number(spot.freq), normalizeBand(spot.band)].join("|");
+}
+
+function skippedContinentForSpot(spot) {
+  const continent = normalizeContinent(spot.dx_continent || spot.continent);
+  return skipContinents[continent] ? continent : "";
+}
+
+function applySkipContinentsToCurrentSpots() {
+  refreshUtcStationState();
+
+  for (const spot of currentSpots) {
+    const key = loggedKey(spot);
+    const skippedContinent = skippedContinentForSpot(spot);
+    const autoContinent = stationState.autoTried[key];
+
+    if (skippedContinent) {
+      stationState.tried[key] = true;
+      stationState.autoTried[key] = skippedContinent;
+    } else if (autoContinent) {
+      delete stationState.tried[key];
+      delete stationState.autoTried[key];
+    }
+  }
+
+  saveStationState();
 }
 
 function isWorkedSpot(spot) {
@@ -358,14 +414,15 @@ function renderEmpty(message) {
 }
 
 async function tuneCommander(spot) {
-  const offsetHz = cleanVfoOffsetHz();
+  const tunedKey = loggedKey(spot);
   const response = await fetch("/api/tune", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       freq: spot.freq,
       mode: effectiveSpotMode(spot),
-      vfoOffsetHz: offsetHz
+      tunedKey,
+      useXitSequence: xitSequenceCheckbox.checked
     })
   });
   const payload = await response.json();
@@ -374,10 +431,8 @@ async function tuneCommander(spot) {
     throw new Error(payload.error || `HTTP ${response.status}`);
   }
 
-  stationState.tunedKey = loggedKey(spot);
-  saveStationState();
-  renderStationState();
-  return offsetHz;
+  setTunedKey(payload.tunedKey || tunedKey);
+  return payload;
 }
 
 async function tuneSpot(spot, button) {
@@ -387,8 +442,9 @@ async function tuneSpot(spot, button) {
   setStatus(`Tuning ${spot.dx_call} on ${formatFrequency(spot.freq)}...`);
 
   try {
-    const offsetHz = await tuneCommander(spot);
-    setStatus(`Commander tuned to ${spot.dx_call} on ${formatFrequency(spot.freq)} with CW TX ${offsetHz >= 0 ? "+" : ""}${offsetHz} Hz.`);
+    const payload = await tuneCommander(spot);
+    const xitMessage = payload.usedXitSequence ? ` and ran XIT sequence "${payload.xitSequenceName}"` : "";
+    setStatus(`Commander tuned to ${spot.dx_call} on ${formatFrequency(spot.freq)}${xitMessage}.`);
   } catch (error) {
     setStatus(`Could not tune Commander: ${error.message}`, true);
   } finally {
@@ -414,7 +470,9 @@ function markSpotLogged(spot) {
 
 function markSpotTried(spot) {
   refreshUtcStationState();
-  stationState.tried[loggedKey(spot)] = true;
+  const key = loggedKey(spot);
+  stationState.tried[key] = true;
+  delete stationState.autoTried[key];
   saveStationState();
   renderStationState();
 }
@@ -523,8 +581,10 @@ function openLogDialog(spot) {
 
   if (typeof logDialog.showModal === "function") {
     logDialog.showModal();
-    spotCommentInput.focus();
-    spotCommentInput.select();
+    if (!window.matchMedia("(max-width: 760px)").matches) {
+      spotCommentInput.focus();
+      spotCommentInput.select();
+    }
   } else {
     logAndMaybeSpot(spot);
   }
@@ -556,7 +616,9 @@ function renderWorkedBadges(cell, spot) {
   if (stationState.tried[key]) {
     const triedBadge = document.createElement("span");
     triedBadge.className = "state-badge tried-badge";
-    triedBadge.textContent = "Tried";
+    triedBadge.textContent = stationState.autoTried[key]
+      ? `Skip ${stationState.autoTried[key]}`
+      : "Tried";
     wrap.append(triedBadge);
   }
 
@@ -593,6 +655,44 @@ function renderStationState() {
     row.querySelector(".tried-checkbox").checked = isTried;
     renderWorkedBadges(row.querySelector("[data-cell='worked']"), spot);
   }
+}
+
+function setTunedKey(tunedKey) {
+  refreshUtcStationState();
+  const cleanTunedKey = String(tunedKey || "");
+  stationState.tunedKey = cleanTunedKey;
+  if (cleanTunedKey && currentSpots.some(spot => loggedKey(spot) === cleanTunedKey)) {
+    selectedSpotKey = cleanTunedKey;
+  }
+  saveStationState();
+  renderStationState();
+}
+
+async function syncTunedState() {
+  try {
+    const response = await fetch("/api/tuned", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+
+    const tunedKey = String(payload.tunedKey || "");
+    const tunedAt = Number(payload.updatedAt || 0);
+    if (!tunedKey || (tunedAt && new Date(tunedAt).toISOString().slice(0, 10) !== utcDayKey())) {
+      return;
+    }
+
+    if (stationState.tunedKey !== tunedKey && currentSpots.some(spot => loggedKey(spot) === tunedKey)) {
+      setTunedKey(tunedKey);
+    }
+  } catch {
+    // Cross-device tuned state is optional; local tuning should keep working.
+  }
+}
+
+function scheduleTunedSync() {
+  clearInterval(tunedSyncTimer);
+  tunedSyncTimer = setInterval(syncTunedState, TUNED_SYNC_MS);
 }
 
 function spotIndexByKey(key) {
@@ -652,9 +752,12 @@ function openShortcutsDialog() {
   }
 }
 
-function isScannableSpot(spot) {
+function isScannableSpot(spot, { ignoreScannedThisRun = false } = {}) {
   const key = loggedKey(spot);
-  return isValidSpotFrequency(spot.freq) && !isWorkedSpot(spot) && !stationState.tried[key];
+  return isValidSpotFrequency(spot.freq)
+    && !isWorkedSpot(spot)
+    && !stationState.tried[key]
+    && (ignoreScannedThisRun || !scanState.scannedKeys?.has(key));
 }
 
 function tunedSpotIndex() {
@@ -706,7 +809,7 @@ function scheduleScanAdvance() {
 
 function stopScan(message = "Scan stopped.") {
   clearScanTimer();
-  scanState = { active: false, currentIndex: -1, currentSpot: undefined };
+  scanState = { active: false, currentIndex: -1, currentSpot: undefined, scannedKeys: new Set(), advancing: false };
   updateScanButtons();
   if (scanDialog.open) {
     scanDialog.close();
@@ -721,6 +824,7 @@ async function tuneScanSpot(index) {
     return;
   }
 
+  scanState.scannedKeys.add(loggedKey(spot));
   scanState.currentIndex = index;
   scanState.currentSpot = spot;
   selectSpotByIndex(index);
@@ -738,27 +842,39 @@ async function tuneScanSpot(index) {
 }
 
 async function advanceScan({ markTried = false } = {}) {
-  if (!scanState.active) {
+  if (!scanState.active || scanState.advancing) {
     return;
   }
 
   clearScanTimer();
+  scanState.advancing = true;
 
-  if (markTried && scanState.currentSpot) {
-    markSpotTried(scanState.currentSpot);
+  try {
+    if (markTried && scanState.currentSpot) {
+      markSpotTried(scanState.currentSpot);
+    }
+
+    const nextIndex = findNextScannableIndex(scanState.currentIndex);
+    if (nextIndex === -1) {
+      stopScan("No more unworked, untried spots in this scan.");
+      return;
+    }
+
+    await tuneScanSpot(nextIndex);
+  } finally {
+    if (scanState.active) {
+      scanState.advancing = false;
+    }
   }
-
-  const nextIndex = findNextScannableIndex(scanState.currentIndex);
-  if (nextIndex === -1) {
-    stopScan("No more unworked, untried spots to scan.");
-    return;
-  }
-
-  await tuneScanSpot(nextIndex);
 }
 
 async function startScan() {
   try {
+    if (scanState.active) {
+      setStatus("Scan is already running.");
+      return;
+    }
+
     cleanScanDelayMs();
     const tunedIndex = tunedSpotIndex();
     const firstIndex = findNextScannableIndex(tunedIndex);
@@ -767,14 +883,14 @@ async function startScan() {
       return;
     }
 
-    scanState = { active: true, currentIndex: -1, currentSpot: undefined };
+    scanState = { active: true, currentIndex: -1, currentSpot: undefined, scannedKeys: new Set(), advancing: false };
     updateScanButtons();
     if (typeof scanDialog.showModal === "function") {
       scanDialog.showModal();
     }
     await tuneScanSpot(firstIndex);
   } catch (error) {
-    scanState = { active: false, currentIndex: -1, currentSpot: undefined };
+    scanState = { active: false, currentIndex: -1, currentSpot: undefined, scannedKeys: new Set(), advancing: false };
     updateScanButtons();
     setStatus(`Could not start scan: ${error.message}`, true);
   }
@@ -812,6 +928,7 @@ function renderSpots(spots) {
     row.querySelector(".tried-checkbox").addEventListener("change", event => {
       refreshUtcStationState();
       stationState.tried[row.dataset.loggedKey] = event.currentTarget.checked;
+      delete stationState.autoTried[row.dataset.loggedKey];
       if (!event.currentTarget.checked) {
         delete stationState.tried[row.dataset.loggedKey];
       }
@@ -828,6 +945,19 @@ function renderSpots(spots) {
 }
 
 async function loadSpots() {
+  if (spotLoadPromise) {
+    return spotLoadPromise;
+  }
+
+  spotLoadPromise = loadSpotsOnce();
+  try {
+    return await spotLoadPromise;
+  } finally {
+    spotLoadPromise = undefined;
+  }
+}
+
+async function loadSpotsOnce() {
   refreshUtcLogState();
   refreshUtcStationState();
   refreshButton.disabled = true;
@@ -841,10 +971,6 @@ async function loadSpots() {
       limit: String(appConfig.spotLimit || 500)
     });
 
-    if (bandSelect.value) {
-      params.set("band", bandSelect.value);
-    }
-
     const response = await fetch(`/api/spots?${params}`);
     const spots = await response.json();
 
@@ -856,6 +982,7 @@ async function loadSpots() {
 
     const preparedSpots = prepareSpots(spots);
     currentSpots = preparedSpots;
+    applySkipContinentsToCurrentSpots();
     renderSpots(preparedSpots);
     const modeLabel = modeSelect.value === "PHONE" ? "phone" : "CW";
     setStatus(`${preparedSpots.length} latest ${modeLabel} spot${preparedSpots.length === 1 ? "" : "s"} from POTA, WWFF, and SOTA.`);
@@ -876,11 +1003,44 @@ async function loadSpots() {
 
 function scheduleRefresh(delayMs = DEFAULT_REFRESH_MS) {
   clearTimeout(refreshTimer);
+  if (isClientIdle) {
+    return;
+  }
+
   refreshTimer = setTimeout(() => {
     loadSpots().finally(() => {
       scheduleRefresh(nextRefreshDelayMs);
     });
   }, Math.max(DEFAULT_REFRESH_MS, Number(delayMs) || DEFAULT_REFRESH_MS));
+}
+
+function pauseSpotRefresh() {
+  clearTimeout(refreshTimer);
+  refreshTimer = undefined;
+}
+
+function enterIdleMode() {
+  isClientIdle = true;
+  pauseSpotRefresh();
+  setStatus("Idle: automatic spot refresh paused.");
+}
+
+function resetIdleTimer() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(enterIdleMode, IDLE_TIMEOUT_MS);
+}
+
+function noteClientActivity() {
+  const wasIdle = isClientIdle;
+  isClientIdle = false;
+  resetIdleTimer();
+
+  if (wasIdle) {
+    setStatus("Resuming spot refresh...");
+    loadSpots().finally(() => {
+      scheduleRefresh(nextRefreshDelayMs);
+    });
+  }
 }
 
 function isTypingTarget(target) {
@@ -964,7 +1124,18 @@ refreshButton.addEventListener("click", loadSpots);
 railRefreshButton.addEventListener("click", loadSpots);
 ageSelect.addEventListener("change", loadSpots);
 modeSelect.addEventListener("change", loadSpots);
-bandSelect.addEventListener("change", loadSpots);
+skipAsiaCheckbox.addEventListener("change", () => {
+  skipContinents.AS = skipAsiaCheckbox.checked;
+  saveSkipContinents();
+  applySkipContinentsToCurrentSpots();
+  renderStationState();
+});
+skipEuropeCheckbox.addEventListener("change", () => {
+  skipContinents.EU = skipEuropeCheckbox.checked;
+  saveSkipContinents();
+  applySkipContinentsToCurrentSpots();
+  renderStationState();
+});
 railScanButton.addEventListener("click", startScan);
 stopScanButton.addEventListener("click", () => stopScan());
 skipScanButton.addEventListener("click", () => {
@@ -1006,7 +1177,13 @@ scanDialog.addEventListener("close", () => {
   }
 });
 document.addEventListener("keydown", handleKeydown);
+["pointerdown", "keydown", "wheel", "touchstart"].forEach(eventName => {
+  document.addEventListener(eventName, noteClientActivity, { passive: true });
+});
+window.addEventListener("focus", noteClientActivity);
 
 await loadConfig();
-loadSpots();
+resetIdleTimer();
+loadSpots().then(syncTunedState);
 scheduleRefresh();
+scheduleTunedSync();

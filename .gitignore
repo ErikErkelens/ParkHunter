@@ -1,4 +1,6 @@
 server.*.log
+window-attention-*.log
+ka9q_ubersdr/
 node_modules/
 .env.local
 .cache/

@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<!--
+API Monitor capture filter for correlating DXLab Commander focus attempts with
+serial COM-port activity. Load this in API Monitor x86 when monitoring Commander.
+-->
+<ApiMonitor>
+  <CaptureFilter>
+    <Module Name="Kernel32.dll">
+      <Api Name="CancelIo"/>
+      <Api Name="CancelIoEx"/>
+      <Api Name="ClearCommError"/>
+      <Api Name="CloseHandle"/>
+      <Api Name="CreateFileA"/>
+      <Api Name="CreateFileW"/>
+      <Api Name="DeviceIoControl"/>
+      <Api Name="EscapeCommFunction"/>
+      <Api Name="GetCommMask"/>
+      <Api Name="GetCommModemStatus"/>
+      <Api Name="GetCommState"/>
+      <Api Name="GetCommTimeouts"/>
+      <Api Name="GetOverlappedResult"/>
+      <Api Name="PurgeComm"/>
+      <Api Name="ReadFile"/>
+      <Api Name="SetCommMask"/>
+      <Api Name="SetCommState"/>
+      <Api Name="SetCommTimeouts"/>
+      <Api Name="SetupComm"/>
+      <Api Name="WaitCommEvent"/>
+      <Api Name="WriteFile"/>
+    </Module>
+    <Module Name="Ole32.dll">
+      <Api Name="CoAllowSetForegroundWindow"/>
+    </Module>
+    <Module Name="User32.dll">
+      <Api Name="AllowSetForegroundWindow"/>
+      <Api Name="AttachThreadInput"/>
+      <Api Name="BringWindowToTop"/>
+      <Api Name="FlashWindow"/>
+      <Api Name="FlashWindowEx"/>
+      <Api Name="GetActiveWindow"/>
+      <Api Name="GetFocus"/>
+      <Api Name="GetForegroundWindow"/>
+      <Api Name="OpenIcon"/>
+      <Api Name="PostMessageA"/>
+      <Api Name="PostMessageW"/>
+      <Api Name="SendInput"/>
+      <Api Name="SendMessageA"/>
+      <Api Name="SendMessageW"/>
+      <Api Name="SetActiveWindow"/>
+      <Api Name="SetFocus"/>
+      <Api Name="SetForegroundWindow"/>
+      <Api Name="SetWindowPlacement"/>
+      <Api Name="SetWindowPos"/>
+      <Api Name="ShowWindow"/>
+      <Api Name="ShowWindowAsync"/>
+      <Api Name="SwitchToThisWindow"/>
+      <Api Name="keybd_event"/>
+      <Api Name="mouse_event"/>
+    </Module>
+  </CaptureFilter>
+</ApiMonitor>

@@ -26,10 +26,11 @@ COMMANDER_PORT=52002
 DXKEEPER_HOST=127.0.0.1
 DXKEEPER_PORT=52001
 
-CW_TX_OFFSET_HZ=90
+COMMANDER_XIT_SEQUENCE_NAME=xit
+USE_COMMANDER_XIT_SEQUENCE=true
 SPOT_AGE_SECONDS=1800
 SPOT_LIMIT=500
-SCAN_DELAY_SECONDS=3
+SCAN_DELAY_SECONDS=2
 
 QRZ_USERNAME=your-callsign
 QRZ_PASSWORD=your-qrz-xml-password-or-key
@@ -54,7 +55,8 @@ Required for tuning and logging:
 
 Useful operating defaults:
 
-- `CW_TX_OFFSET_HZ`: CW transmit offset used for Commander's split command. Default `90`.
+- `COMMANDER_XIT_SEQUENCE_NAME`: Commander user-defined command sequence run after CW tuning when XIT is enabled. Default `xit`.
+- `USE_COMMANDER_XIT_SEQUENCE`: initial state of the XIT checkbox. Set to `false` to start with XIT disabled. Default `true`.
 - `SPOT_AGE_SECONDS`: initial spot age filter. Default `1800`, or 30 minutes. Accepted UI values are `900`, `1800`, and `3600`.
 - `SPOT_LIMIT`: number of recent Spothole spots requested per refresh. Default `500`, capped at `1000`.
 - `SCAN_DELAY_SECONDS`: scan auto-advance delay. Default `2`.
@@ -92,7 +94,16 @@ Cache and API politeness:
 ## DXLab Setup
 
 In Commander, open the Network Service window and enable TCP command acceptance.
-ParkHunter sends `CmdSetFreqMode` to tune the radio, then sends `CmdQSXSplit` for CW spots with the configured transmit offset.
+ParkHunter sends `CmdSetFreqMode` to tune the radio. When the XIT checkbox is enabled and the tuned spot is CW, ParkHunter then sends Commander `seqname` for the configured `COMMANDER_XIT_SEQUENCE_NAME` sequence.
+
+To use the default setup, create a Commander user-defined command sequence named `xit`. For an FTDX10 with a +90 Hz CW transmit offset, the sequence can use the radio's TX clarifier/XIT CAT commands, for example:
+
+```text
+'CF001+0090;
+'CF00001000;
+```
+
+The exact CAT commands are radio-specific. The leading apostrophe tells Commander to send the line as a CAT command. If you use a different sequence name, set `COMMANDER_XIT_SEQUENCE_NAME` in `.env.local`. The XIT checkbox on the main screen controls whether ParkHunter runs the sequence after tuning CW spots.
 
 In DXKeeper, enable the Network Service.
 The Log action sends DXKeeper a `log` TCP message with an ADIF record containing call, signal reports, frequency, band, mode, UTC date/time, and xOTA fields. POTA logs include `POTA_REF`, `SIG=POTA`, and `SIG_INFO=<reference>`.

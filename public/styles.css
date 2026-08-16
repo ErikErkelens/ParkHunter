@@ -98,6 +98,72 @@ select {
   padding: 8px 10px;
 }
 
+.skip-controls {
+  border: 0;
+  color: var(--muted);
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.skip-controls legend {
+  font-size: 0.82rem;
+  font-weight: 700;
+  grid-column: 1 / -1;
+  padding: 0;
+}
+
+.skip-checkbox {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: row;
+  font-size: 0.92rem;
+  font-weight: 800;
+  gap: 7px;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.skip-checkbox input {
+  accent-color: var(--accent);
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  width: 16px;
+}
+
+.xit-checkbox {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: row;
+  font-size: 0.92rem;
+  font-weight: 800;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.xit-checkbox input {
+  accent-color: var(--accent);
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  width: 16px;
+}
+
 .sticky-action-rail {
   align-items: center;
   background: rgba(247, 248, 250, 0.96);
@@ -552,6 +618,27 @@ tr.logged-exact td:not(:last-child) {
 }
 
 @media (max-width: 760px) {
+  body {
+    background: #eef2f5;
+  }
+
+  .app-header {
+    padding: 14px 14px;
+  }
+
+  .app-header .eyebrow {
+    display: none;
+  }
+
+  h1 {
+    font-size: 1.45rem;
+  }
+
+  .app-shell {
+    gap: 10px;
+    padding: 10px 10px 22px;
+  }
+
   .controls {
     grid-template-columns: 1fr 1fr;
   }
@@ -564,6 +651,230 @@ tr.logged-exact td:not(:last-child) {
 
   .rail-status {
     justify-content: center;
+  }
+
+  .spot-table-wrap {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  table,
+  tbody,
+  tr,
+  td {
+    display: block;
+    width: 100%;
+  }
+
+  table {
+    min-width: 0;
+  }
+
+  thead {
+    display: none;
+  }
+
+  tbody {
+    display: grid;
+    gap: 8px;
+  }
+
+  tbody tr {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(31, 42, 55, 0.07);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 11px 12px;
+  }
+
+  tbody tr:hover {
+    background: var(--panel);
+  }
+
+  tbody tr.selected-row {
+    box-shadow: inset 0 0 0 2px var(--accent), 0 4px 14px rgba(31, 42, 55, 0.07);
+    outline: 0;
+  }
+
+  tbody tr.tuned-exact {
+    background: #e8f7f5;
+    box-shadow: inset 4px 0 0 var(--accent), 0 4px 14px rgba(31, 42, 55, 0.07);
+  }
+
+  tbody tr.selected-row.tuned-exact {
+    box-shadow: inset 4px 0 0 var(--accent), inset 0 0 0 2px var(--accent), 0 4px 14px rgba(31, 42, 55, 0.07);
+  }
+
+  tbody tr.tried-exact {
+    background: #f7f8fa;
+  }
+
+  th,
+  td {
+    border-bottom: 0;
+    padding: 0;
+  }
+
+  td[data-cell="time"],
+  td[data-cell="band"],
+  td[data-cell="spotter"] {
+    display: none;
+  }
+
+  td[data-cell="call"] {
+    font-size: 1.08rem;
+    grid-column: 1;
+    grid-row: 1;
+    line-height: 1.18;
+    min-width: 0;
+    padding-right: 10px;
+  }
+
+  td[data-cell="ref"] {
+    color: var(--muted);
+    font-size: 0.88rem;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    line-height: 1.35;
+    margin-top: 5px;
+    min-width: 0;
+  }
+
+  td[data-cell="freq"],
+  td[data-cell="region"] {
+    color: #4a5562;
+    font-size: 0.82rem;
+    line-height: 1.25;
+    min-width: 0;
+  }
+
+  td[data-cell="freq"] {
+    align-self: start;
+    display: block;
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    margin-top: 2px;
+    padding-left: 10px;
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  td[data-cell="region"] {
+    display: block;
+    grid-column: 1;
+    grid-row: 3;
+    margin-top: 7px;
+  }
+
+  td[data-cell="region"]:empty {
+    display: none;
+  }
+
+  td[data-cell="worked"] {
+    grid-column: 1;
+    grid-row: 4;
+    margin-top: 8px;
+  }
+
+  tr.logged-exact td:not(:last-child) {
+    text-decoration: none;
+  }
+
+  tr.logged-exact td[data-cell="call"] {
+    text-decoration: line-through;
+    text-decoration-color: #ba1a1a;
+    text-decoration-thickness: 1px;
+  }
+
+  .activator-name {
+    font-size: 0.82rem;
+  }
+
+  .worked-bands {
+    min-width: 0;
+  }
+
+  .actions {
+    align-self: end;
+    gap: 10px;
+    grid-column: 2;
+    grid-row: 3 / span 2;
+    justify-content: flex-end;
+    justify-self: end;
+    min-width: 0;
+  }
+
+  .tried-control {
+    background: #edf1f5;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    height: 38px;
+    justify-content: center;
+    width: 38px;
+  }
+
+  .log-button {
+    min-height: 38px;
+    min-width: 58px;
+  }
+
+  .empty-row {
+    display: block;
+  }
+
+  .empty-row td {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    display: block;
+    padding: 22px 12px;
+  }
+
+  .log-dialog,
+  .scan-dialog,
+  .shortcuts-dialog {
+    max-height: calc(100dvh - 18px);
+    max-width: calc(100vw - 18px);
+    overflow: auto;
+    width: calc(100vw - 18px);
+  }
+
+  .log-dialog form,
+  .scan-dialog form,
+  .shortcuts-dialog form {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .dialog-header h2 {
+    font-size: 1rem;
+  }
+
+  .dialog-details {
+    font-size: 0.9rem;
+    line-height: 1.35;
+  }
+
+  .dialog-fields {
+    gap: 8px;
+  }
+
+  .report-buttons {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .report-button {
+    min-height: 38px;
+  }
+
+  .dialog-actions .log-button {
+    width: 100%;
   }
 
 }

@@ -1,0 +1,24 @@
+{
+  "name": "ParkHunter",
+  "short_name": "ParkHunter",
+  "description": "xOTA spot browser with DXLab Commander tuning support.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#18212a",
+  "icons": [
+    {
+      "src": "/assets/icons/parkhunter-browser.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icons/parkhunter-browser.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

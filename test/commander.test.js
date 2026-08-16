@@ -1,13 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  addHzOffset,
   adifField,
+  buildCommanderSequenceNameCommand,
   buildDxClusterSpotCommand,
   buildDxClusterSpotNotes,
   buildDxKeeperLogCommand,
   buildPotaSpotPayload,
-  buildQsxSplitCommand,
   buildSetFreqModeCommand,
   buildTuneCommands,
   hzToMhz,
@@ -15,8 +14,7 @@ import {
   isPhoneInCwOnlyPortion,
   isPotaSpot,
   isQrtSpot,
-  normalizeCommanderMode,
-  normalizeVfoOffsetHz
+  normalizeCommanderMode
 } from "../server.js";
 
 test("builds ADIF fields with the correct value length", () => {
@@ -40,34 +38,29 @@ test("maps CW spots to a Commander set frequency and mode command", () => {
   );
 });
 
-test("builds a QSX split command for a 90 Hz CW TX offset", () => {
-  assert.equal(addHzOffset(7150500, 90), 7150590);
+test("builds a Commander sequence name command for XIT", () => {
   assert.equal(
-    buildQsxSplitCommand({ txFreqHz: 7150590 }),
-    "<command:11>CmdQSXSplit<parameters:59><xcvrfreq:7>7150.59<SuppressDual:1>Y<SuppressModeChange:1>N"
+    buildCommanderSequenceNameCommand("xit"),
+    "<command:7>seqname<parameters:8><1:3>xit"
   );
 });
 
-test("adds the CW TX offset command only for CW spots", () => {
+test("adds the XIT sequence command only for CW spots", () => {
   assert.equal(buildTuneCommands({ freqHz: 7150500, mode: "CW" }).length, 2);
   assert.equal(buildTuneCommands({ freqHz: 14250000, mode: "SSB" }).length, 1);
 });
 
-test("allows a custom VFO offset from -5000 to 5000 Hz", () => {
-  assert.equal(normalizeVfoOffsetHz(-5000), -5000);
-  assert.equal(normalizeVfoOffsetHz("5000"), 5000);
-  assert.throws(() => normalizeVfoOffsetHz(-5001), /VFO offset/);
-  assert.throws(() => normalizeVfoOffsetHz(5001), /VFO offset/);
-  assert.throws(() => normalizeVfoOffsetHz(90.5), /VFO offset/);
-});
-
-test("uses a custom CW TX offset when building tune commands", () => {
-  const commands = buildTuneCommands({ freqHz: 7150500, mode: "CW", cwTxOffsetHz: -250 });
+test("uses a custom XIT sequence name when building tune commands", () => {
+  const commands = buildTuneCommands({ freqHz: 7150500, mode: "CW", xitSequenceName: "parkhunter-xit" });
   assert.equal(commands.length, 2);
-  assert.match(commands[1], /<xcvrfreq:7>7150.25/);
+  assert.match(commands[1], /<1:14>parkhunter-xit/);
 });
 
-test("builds a DXKeeper log command with POTA ADIF fields", () => {
+test("can tune CW without running the XIT sequence", () => {
+  assert.equal(buildTuneCommands({ freqHz: 7150500, mode: "CW", useXitSequence: false }).length, 1);
+});
+
+test("builds a DXKeeper log command with POTA ADIF fields and no comment", () => {
   const command = buildDxKeeperLogCommand({
     loggedAt: new Date("2026-05-22T14:03:04Z"),
     spot: {
@@ -93,7 +86,7 @@ test("builds a DXKeeper log command with POTA ADIF fields", () => {
   assert.match(command, /<SIG:4>POTA/);
   assert.match(command, /<SIG_INFO:7>US-1234/);
   assert.match(command, /<POTA_REF:7>US-1234/);
-  assert.match(command, /<COMMENT:7>559 WNY/);
+  assert.doesNotMatch(command, /<COMMENT:/);
   assert.match(command, /<EOR>$/);
 });
 

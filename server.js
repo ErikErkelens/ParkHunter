@@ -45,9 +45,8 @@ const DEFAULT_COMMANDER_HOST = process.env.COMMANDER_HOST || "127.0.0.1";
 const DEFAULT_COMMANDER_PORT = Number(process.env.COMMANDER_PORT || 52002);
 const DEFAULT_DXKEEPER_HOST = process.env.DXKEEPER_HOST || "127.0.0.1";
 const DEFAULT_DXKEEPER_PORT = Number(process.env.DXKEEPER_PORT || 52001);
-const CW_TX_OFFSET_HZ = Number(process.env.CW_TX_OFFSET_HZ || 90);
-const MIN_VFO_OFFSET_HZ = -5000;
-const MAX_VFO_OFFSET_HZ = 5000;
+const COMMANDER_XIT_SEQUENCE_NAME = process.env.COMMANDER_XIT_SEQUENCE_NAME || "xit";
+const USE_COMMANDER_XIT_SEQUENCE = String(process.env.USE_COMMANDER_XIT_SEQUENCE || "true").toLowerCase() !== "false";
 const QRZ_USERNAME = process.env.QRZ_USERNAME || "";
 const QRZ_PASSWORD = process.env.QRZ_PASSWORD || "";
 const QRZ_BASE_URL = process.env.QRZ_BASE_URL || "https://xmldata.qrz.com/xml/current/";
@@ -87,12 +86,16 @@ let potaReferenceCache = new Map();
 let potaReferenceCacheRefreshPromise;
 let spotholeBackoffUntil = 0;
 let spotholeBackoffReason = "";
+let tunedSpotKey = "";
+let tunedSpotUpdatedAt = 0;
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".svg": "image/svg+xml"
 };
 
@@ -117,16 +120,6 @@ export function hzToMhz(freqHz) {
   }
 
   return (numericFreq / 1000000).toFixed(5).replace(/\.?0+$/, "");
-}
-
-export function addHzOffset(freqHz, offsetHz) {
-  const numericFreq = Number(freqHz);
-  const numericOffset = Number(offsetHz);
-  if (!Number.isFinite(numericFreq) || !Number.isFinite(numericOffset)) {
-    throw new Error("A valid frequency and offset are required.");
-  }
-
-  return numericFreq + numericOffset;
 }
 
 export function normalizeCommanderMode(mode, freqHz) {
@@ -168,15 +161,15 @@ export function buildSetFreqModeCommand({ freqHz, mode }) {
   return `${adifField("command", "CmdSetFreqMode")}${adifField("parameters", parameters)}`;
 }
 
-export function buildQsxSplitCommand({ txFreqHz }) {
-  const commanderFreq = hzToCommanderKhz(txFreqHz);
-  const parameters = [
-    adifField("xcvrfreq", commanderFreq),
-    adifField("SuppressDual", "Y"),
-    adifField("SuppressModeChange", "N")
-  ].join("");
+export function buildCommanderSequenceNameCommand(sequenceName = COMMANDER_XIT_SEQUENCE_NAME) {
+  const cleanName = String(sequenceName || "").trim();
+  if (!cleanName) {
+    throw new Error("Commander XIT sequence name is required.");
+  }
 
-  return `${adifField("command", "CmdQSXSplit")}${adifField("parameters", parameters)}`;
+  const parameters = adifField("1", cleanName);
+
+  return `${adifField("command", "seqname")}${adifField("parameters", parameters)}`;
 }
 
 export function isCwCommanderMode(mode) {
@@ -212,24 +205,15 @@ function effectiveSpotMode(spot) {
   return spot?.modeOverride || spot?.mode || spot?.mode_type;
 }
 
-export function buildTuneCommands({ freqHz, mode, cwTxOffsetHz = CW_TX_OFFSET_HZ }) {
+export function buildTuneCommands({ freqHz, mode, useXitSequence = USE_COMMANDER_XIT_SEQUENCE, xitSequenceName = COMMANDER_XIT_SEQUENCE_NAME }) {
   const commanderMode = normalizeCommanderMode(mode, freqHz);
   const commands = [buildSetFreqModeCommand({ freqHz, mode: commanderMode })];
 
-  if (isCwCommanderMode(commanderMode)) {
-    commands.push(buildQsxSplitCommand({ txFreqHz: addHzOffset(freqHz, cwTxOffsetHz) }));
+  if (useXitSequence && isCwCommanderMode(commanderMode)) {
+    commands.push(buildCommanderSequenceNameCommand(xitSequenceName));
   }
 
   return commands;
-}
-
-export function normalizeVfoOffsetHz(offsetHz = CW_TX_OFFSET_HZ) {
-  const numericOffset = Number(offsetHz);
-  if (!Number.isInteger(numericOffset) || numericOffset < MIN_VFO_OFFSET_HZ || numericOffset > MAX_VFO_OFFSET_HZ) {
-    throw new Error(`VFO offset must be a whole number from ${MIN_VFO_OFFSET_HZ} to ${MAX_VFO_OFFSET_HZ} Hz.`);
-  }
-
-  return numericOffset;
 }
 
 function xmlText(xml, tagName) {
@@ -676,7 +660,6 @@ export function buildDxKeeperLogCommand({ spot, loggedAt = new Date() }) {
   const sotaRef = firstSigRef(spot, "SOTA")?.id || (sig === "SOTA" ? reference : "");
   const wwffRef = firstSigRef(spot, "WWFF")?.id || (sig === "WWFF" ? reference : "");
   const signalReport = normalizeSignalReport(spot.signalReport || spot.report);
-  const logComment = normalizeAdifValue(spot.logComment || spot.comment).slice(0, 1024);
   const fields = [
     ["CALL", normalizeAdifValue(spot.dx_call)],
     ["RST_SENT", signalReport],
@@ -706,10 +689,6 @@ export function buildDxKeeperLogCommand({ spot, loggedAt = new Date() }) {
 
   if (wwffRef) {
     fields.push(["WWFF_REF", wwffRef]);
-  }
-
-  if (logComment) {
-    fields.push(["COMMENT", logComment]);
   }
 
   const adifRecord = `${fields
@@ -1202,7 +1181,8 @@ async function handleSpots(request, response) {
 
 function handleConfig(response) {
   sendJson(response, 200, {
-    cwTxOffsetHz: normalizeVfoOffsetHz(CW_TX_OFFSET_HZ),
+    commanderXitSequenceName: COMMANDER_XIT_SEQUENCE_NAME,
+    useCommanderXitSequence: USE_COMMANDER_XIT_SEQUENCE,
     spotAgeSeconds: DEFAULT_SPOT_AGE_SECONDS,
     spotLimit: Math.min(Math.max(Math.trunc(DEFAULT_SPOT_LIMIT), 1), MAX_SPOT_LIMIT),
     scanDelaySeconds: DEFAULT_SCAN_DELAY_SECONDS,
@@ -1210,11 +1190,19 @@ function handleConfig(response) {
   });
 }
 
+function handleTuned(response) {
+  sendJson(response, 200, {
+    ok: true,
+    tunedKey: tunedSpotKey,
+    updatedAt: tunedSpotUpdatedAt
+  });
+}
+
 async function handleTune(request, response) {
   const rawBody = await getRequestBody(request);
   const body = rawBody ? JSON.parse(rawBody) : {};
-  const cwTxOffsetHz = normalizeVfoOffsetHz(body.vfoOffsetHz ?? body.cwTxOffsetHz ?? CW_TX_OFFSET_HZ);
-  const commands = buildTuneCommands({ freqHz: body.freq, mode: effectiveSpotMode(body), cwTxOffsetHz });
+  const useXitSequence = body.useXitSequence ?? USE_COMMANDER_XIT_SEQUENCE;
+  const commands = buildTuneCommands({ freqHz: body.freq, mode: effectiveSpotMode(body), useXitSequence });
   const host = DEFAULT_COMMANDER_HOST;
   const port = DEFAULT_COMMANDER_PORT;
 
@@ -1227,7 +1215,17 @@ async function handleTune(request, response) {
     await sendTcpCommand({ host, port, command, appName: "Commander" });
   }
 
-  sendJson(response, 200, { ok: true, commands });
+  tunedSpotKey = String(body.tunedKey || "").trim();
+  tunedSpotUpdatedAt = tunedSpotKey ? Date.now() : 0;
+
+  sendJson(response, 200, {
+    ok: true,
+    commands,
+    tunedKey: tunedSpotKey,
+    tunedUpdatedAt: tunedSpotUpdatedAt,
+    usedXitSequence: Boolean(useXitSequence) && commands.length > 1,
+    xitSequenceName: COMMANDER_XIT_SEQUENCE_NAME
+  });
 }
 
 async function handleLog(request, response) {
@@ -1350,6 +1348,11 @@ export async function routeRequest(request, response) {
 
     if (request.method === "GET" && requestUrl.pathname === "/api/config") {
       handleConfig(response);
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/tuned") {
+      handleTuned(response);
       return;
     }
 

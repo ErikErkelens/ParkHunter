@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ParkHunter icon">
+  <rect width="512" height="512" fill="#000000"/>
+  <g fill="none" stroke="#16a34a" stroke-width="34" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M96 77 H234 A94 94 0 0 1 234 265 H96"/>
+      <line x1="96" y1="77" x2="96" y2="435"/>
+      <line x1="296" y1="246" x2="296" y2="435"/>
+      <line x1="416" y1="246" x2="416" y2="435"/>
+      <line x1="296" y1="340" x2="416" y2="340"/>
+  </g>
+</svg>

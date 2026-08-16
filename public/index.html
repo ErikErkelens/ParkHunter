@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ParkHunter</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/assets/icons/parkhunter-browser.png">
+    <meta name="theme-color" content="#18212a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="ParkHunter">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
@@ -52,27 +58,21 @@
           </select>
         </label>
 
-        <label>
-          Band
-          <select id="bandSelect">
-            <option value="">All bands</option>
-            <option>80m</option>
-            <option>60m</option>
-            <option>40m</option>
-            <option>30m</option>
-            <option>20m</option>
-            <option>17m</option>
-            <option>15m</option>
-            <option>12m</option>
-            <option>10m</option>
-            <option>6m</option>
-            <option>2m</option>
-          </select>
-        </label>
+        <fieldset class="skip-controls">
+          <legend>Skip</legend>
+          <label class="skip-checkbox">
+            <input id="skipAsiaCheckbox" type="checkbox">
+            AS
+          </label>
+          <label class="skip-checkbox">
+            <input id="skipEuropeCheckbox" type="checkbox">
+            EU
+          </label>
+        </fieldset>
 
-        <label>
-          VFO offset (Hz)
-          <input id="vfoOffsetHz" type="number" min="-5000" max="5000" step="10" value="90">
+        <label class="xit-checkbox">
+          <span>XIT</span>
+          <input id="xitSequenceCheckbox" type="checkbox" checked>
         </label>
 
         <label>
